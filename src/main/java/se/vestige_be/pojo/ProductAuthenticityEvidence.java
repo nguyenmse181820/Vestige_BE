@@ -24,7 +24,7 @@ public class ProductAuthenticityEvidence {
     private Product product;
 
     @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
-    private String evidenceType; // receipt, certificate, etc.
+    private String evidenceType;
 
     @Column(length = 255, columnDefinition = "varchar(255)")
     private String evidenceUrl;

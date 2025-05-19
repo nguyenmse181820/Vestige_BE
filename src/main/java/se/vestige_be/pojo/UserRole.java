@@ -2,15 +2,13 @@ package se.vestige_be.pojo;
 
 import jakarta.persistence.*;
 import lombok.*;
-import lombok.experimental.SuperBuilder;
-
 
 @Entity
 @Table(name = "user_roles")
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@SuperBuilder
+@Builder
 public class UserRole {
 
     @Id

@@ -2,7 +2,6 @@ package se.vestige_be.pojo;
 
 import jakarta.persistence.*;
 import lombok.*;
-import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
@@ -14,7 +13,7 @@ import java.util.List;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@SuperBuilder
+@Builder
 public class User {
 
     @Id
@@ -96,5 +95,4 @@ public class User {
 
     @OneToMany(mappedBy = "following", cascade = CascadeType.ALL)
     private List<UserFollow> followers;
-}
 }
