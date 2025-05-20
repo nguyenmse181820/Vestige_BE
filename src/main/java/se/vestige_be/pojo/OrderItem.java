@@ -2,6 +2,8 @@ package se.vestige_be.pojo;
 
 import jakarta.persistence.*;
 import lombok.*;
+import se.vestige_be.pojo.enums.EscrowStatus;
+import se.vestige_be.pojo.enums.OrderItemStatus;
 
 import java.math.BigDecimal;
 
@@ -17,16 +19,19 @@ public class OrderItem {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long orderItemId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_id", nullable = false)
+    @ToString.Exclude
     private Order order;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id", nullable = false)
+    @ToString.Exclude
     private Product product;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "seller_id", nullable = false)
+    @ToString.Exclude
     private User seller;
 
     @Column(nullable = false, precision = 10, scale = 2)
@@ -38,9 +43,14 @@ public class OrderItem {
     @Column(nullable = false, precision = 5, scale = 2)
     private BigDecimal feePercentage;
 
-    @Column(nullable = false, length = 20, columnDefinition = "varchar(20)")
-    private String status; // pending, processing, shipped, delivered, cancelled, refunded
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private OrderItemStatus status = OrderItemStatus.PENDING;
 
-    @Column(length = 20, columnDefinition = "varchar(20)")
-    private String escrowStatus; // holding, released, refunded
+    @Enumerated(EnumType.STRING)
+    @Column(length = 20)
+    @Builder.Default
+    private EscrowStatus escrowStatus = EscrowStatus.HOLDING;
+
 }

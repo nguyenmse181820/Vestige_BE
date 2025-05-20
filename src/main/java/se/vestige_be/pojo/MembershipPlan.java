@@ -6,6 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -20,7 +21,7 @@ public class MembershipPlan {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long planId;
 
-    @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
+    @Column(nullable = false, length = 50)
     private String name;
 
     @Column(nullable = false, precision = 10, scale = 2)
@@ -30,11 +31,15 @@ public class MembershipPlan {
     private String benefits;
 
     @Column(nullable = false)
+    @Builder.Default
     private Boolean isActive = true;
 
     @CreationTimestamp
     private LocalDateTime createdAt;
 
-    @OneToMany(mappedBy = "plan", cascade = CascadeType.ALL)
-    private List<UserMembership> userMemberships;
+    @OneToMany(mappedBy = "plan", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<UserMembership> userMemberships = new ArrayList<>();
+
 }

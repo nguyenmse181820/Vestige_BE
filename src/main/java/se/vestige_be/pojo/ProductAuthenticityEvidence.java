@@ -2,8 +2,8 @@ package se.vestige_be.pojo;
 
 import jakarta.persistence.*;
 import lombok.*;
-import lombok.experimental.SuperBuilder;
 import org.hibernate.annotations.CreationTimestamp;
+import se.vestige_be.pojo.enums.EvidenceType;
 
 import java.time.LocalDateTime;
 
@@ -12,26 +12,29 @@ import java.time.LocalDateTime;
 @Data
 @NoArgsConstructor
 @AllArgsConstructor
-@SuperBuilder
+@Builder
 public class ProductAuthenticityEvidence {
 
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long evidenceId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id")
+    @ToString.Exclude
     private Product product;
 
-    @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
-    private String evidenceType;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 50)
+    private EvidenceType evidenceType;
 
-    @Column(length = 255, columnDefinition = "varchar(255)")
+    @Column(length = 255)
     private String evidenceUrl;
 
     @Column(columnDefinition = "text")
     private String description;
 
+    @Builder.Default
     private Boolean verifiedByAdmin = false;
 
     @Column(columnDefinition = "text")

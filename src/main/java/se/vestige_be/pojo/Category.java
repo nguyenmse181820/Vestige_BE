@@ -5,6 +5,7 @@ import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -19,14 +20,17 @@ public class Category {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long categoryId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "parent_category_id")
+    @ToString.Exclude
     private Category parentCategory;
 
-    @OneToMany(mappedBy = "parentCategory", cascade = CascadeType.ALL)
-    private List<Category> subcategories;
+    @OneToMany(mappedBy = "parentCategory", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<Category> subcategories = new ArrayList<>();
 
-    @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
+    @Column(nullable = false, length = 50)
     private String name;
 
     @Column(columnDefinition = "text")
@@ -34,4 +38,14 @@ public class Category {
 
     @CreationTimestamp
     private LocalDateTime createdAt;
+
+    @OneToMany(mappedBy = "category", fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<Product> products = new ArrayList<>();
+
+    @OneToMany(mappedBy = "category", fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<MarketData> marketData = new ArrayList<>();
 }

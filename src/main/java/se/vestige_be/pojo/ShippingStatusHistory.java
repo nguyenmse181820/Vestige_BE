@@ -3,6 +3,7 @@ package se.vestige_be.pojo;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import se.vestige_be.pojo.enums.ShippingStatus;
 
 import java.time.LocalDateTime;
 
@@ -18,14 +19,16 @@ public class ShippingStatusHistory {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long historyId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "shipping_id", nullable = false)
+    @ToString.Exclude
     private ShippingOrder shippingOrder;
 
-    @Column(nullable = false, length = 30, columnDefinition = "varchar(30)")
-    private String status;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 30)
+    private ShippingStatus status;
 
-    @Column(length = 100, columnDefinition = "varchar(100)")
+    @Column(length = 100)
     private String location;
 
     @Column(columnDefinition = "text")

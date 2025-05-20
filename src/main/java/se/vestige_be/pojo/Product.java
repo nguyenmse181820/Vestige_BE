@@ -2,9 +2,14 @@ package se.vestige_be.pojo;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
+import se.vestige_be.pojo.enums.ProductCondition;
+import se.vestige_be.pojo.enums.ProductStatus;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 @Entity
 @Table(name = "products")
@@ -18,19 +23,22 @@ public class Product {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long productId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "seller_id", nullable = false)
+    @ToString.Exclude
     private User seller;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "category_id")
+    @ToString.Exclude
     private Category category;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
+    @ToString.Exclude
     private Brand brand;
 
-    @Column(nullable = false, length = 100, columnDefinition = "varchar(100)")
+    @Column(nullable = false, length = 100)
     private String title;
 
     @Column(nullable = false, columnDefinition = "text")
@@ -42,30 +50,59 @@ public class Product {
     @Column(precision = 10, scale = 2)
     private BigDecimal originalPrice;
 
-    @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
-    private String condition;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 50)
+    private ProductCondition condition;
 
-    @Column(length = 20, columnDefinition = "varchar(20)")
+    @Column(length = 20)
     private String size;
 
-    @Column(length = 50, columnDefinition = "varchar(50)")
+    @Column(length = 50)
     private String color;
 
-    private BigDecimal authenticityConfidenceScore;
+    @Column(precision = 3, scale = 2)
+    @Builder.Default
+    private BigDecimal authenticityConfidenceScore = BigDecimal.ZERO;
+
+    @Column(precision = 10, scale = 2)
     private BigDecimal shippingFee;
 
-    @Column(nullable = false, length = 20, columnDefinition = "varchar(20)")
-    private String status;
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private ProductStatus status = ProductStatus.DRAFT;
 
-    @Column(columnDefinition = "int default 0")
-    private Integer viewsCount;
+    @Builder.Default
+    private Integer viewsCount = 0;
 
-    @Column(columnDefinition = "int default 0")
-    private Integer likesCount;
+    @Builder.Default
+    private Integer likesCount = 0;
 
     @CreationTimestamp
     private LocalDateTime createdAt;
 
+    @UpdateTimestamp
     private LocalDateTime updatedAt;
+
     private LocalDateTime soldAt;
+
+    @OneToMany(mappedBy = "product", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<ProductImage> images = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<ProductAuthenticityEvidence> authenticityEvidences = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<Offer> offers = new ArrayList<>();
+
+    @OneToMany(mappedBy = "product", fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<ProductLike> likes = new ArrayList<>();
 }

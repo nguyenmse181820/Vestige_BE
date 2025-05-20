@@ -18,29 +18,30 @@ public class UserAddress {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long addressId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @ToString.Exclude
     private User user;
 
-    @Column(nullable = false, length = 100, columnDefinition = "varchar(100)")
+    @Column(nullable = false, length = 100)
     private String addressLine1;
 
-    @Column(length = 100, columnDefinition = "varchar(100)")
+    @Column(length = 100)
     private String addressLine2;
 
-    @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
+    @Column(nullable = false, length = 50)
     private String city;
 
-    @Column(length = 50, columnDefinition = "varchar(50)")
+    @Column(length = 50)
     private String state;
 
-    @Column(nullable = false, length = 20, columnDefinition = "varchar(20)")
+    @Column(nullable = false, length = 20)
     private String postalCode;
 
-    @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
+    @Column(nullable = false, length = 50)
     private String country;
 
-    @Column(nullable = false)
+    @Builder.Default
     private Boolean isDefault = false;
 
     @CreationTimestamp

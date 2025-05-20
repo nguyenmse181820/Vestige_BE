@@ -3,6 +3,8 @@ package se.vestige_be.pojo;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import se.vestige_be.pojo.enums.MembershipStatus;
+
 import java.time.LocalDateTime;
 
 
@@ -18,21 +20,25 @@ public class UserMembership {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long membershipId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @ToString.Exclude
     private User user;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "plan_id", nullable = false)
+    @ToString.Exclude
     private MembershipPlan plan;
 
-    @Column(nullable = false)
-    private LocalDateTime startDate;
+    @Builder.Default
+    private LocalDateTime startDate = LocalDateTime.now();
 
     private LocalDateTime endDate;
 
-    @Column(nullable = false, length = 20, columnDefinition = "varchar(20)")
-    private String status; // active, canceled, expired
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    @Builder.Default
+    private MembershipStatus status = MembershipStatus.ACTIVE;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

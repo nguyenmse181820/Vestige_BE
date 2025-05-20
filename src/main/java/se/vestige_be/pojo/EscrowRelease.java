@@ -27,10 +27,10 @@ public class EscrowRelease {
     private BigDecimal amountReleased;
 
     @Column(nullable = false, length = 20, columnDefinition = "varchar(20)")
-    private String status; // pending, completed
+    private String status;
 
     @Column(length = 50, columnDefinition = "varchar(50)")
-    private String releaseReason; // delivery_confirmed, dispute_resolved
+    private String releaseReason;
 
     private LocalDateTime completedAt;
 

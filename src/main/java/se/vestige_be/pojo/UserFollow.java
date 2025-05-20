@@ -18,13 +18,13 @@ public class UserFollow {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long followId;
 
-    @ManyToOne
-    @JoinColumn(name = "follower_id")
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "follower_id", nullable = false)
     private User follower;
 
-    @ManyToOne
-    @JoinColumn(name = "following_id")
-    private User following;
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "following_id", nullable = false)
+    private User followedUser;
 
     @CreationTimestamp
     private LocalDateTime createdAt;

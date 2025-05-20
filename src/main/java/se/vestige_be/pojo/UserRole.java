@@ -15,11 +15,13 @@ public class UserRole {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long userRoleId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "user_id", nullable = false)
+    @ToString.Exclude
     private User user;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "role_id", nullable = false)
+    @ToString.Exclude
     private Role role;
 }

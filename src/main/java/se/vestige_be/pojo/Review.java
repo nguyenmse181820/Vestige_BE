@@ -18,20 +18,23 @@ public class Review {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long reviewId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "transaction_id")
+    @ToString.Exclude
     private Transaction transaction;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reviewer_id")
+    @ToString.Exclude
     private User reviewer;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reviewed_user_id")
+    @ToString.Exclude
     private User reviewedUser;
 
     @Column(nullable = false)
-    private Integer rating; // 1-5
+    private Integer rating;
 
     @Column(columnDefinition = "text")
     private String comment;

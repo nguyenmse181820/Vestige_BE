@@ -18,13 +18,15 @@ public class ProductImage {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long imageId;
 
-    @ManyToOne
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "product_id")
+    @ToString.Exclude
     private Product product;
 
-    @Column(nullable = false, columnDefinition = "varchar(255)")
+    @Column(nullable = false)
     private String imageUrl;
 
+    @Builder.Default
     private Boolean isPrimary = false;
 
     @Column(nullable = false)
@@ -33,4 +35,3 @@ public class ProductImage {
     @CreationTimestamp
     private LocalDateTime createdAt;
 }
-

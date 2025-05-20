@@ -6,6 +6,7 @@ import org.hibernate.annotations.CreationTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.ArrayList;
 import java.util.List;
 
 @Entity
@@ -20,22 +21,22 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long userId;
 
-    @Column(nullable = false, unique = true, length = 50, columnDefinition = "varchar(50)")
+    @Column(nullable = false, unique = true, length = 50)
     private String username;
 
-    @Column(nullable = false, unique = true, length = 100, columnDefinition = "varchar(100)")
+    @Column(nullable = false, unique = true, length = 100)
     private String email;
 
-    @Column(nullable = false, length = 255, columnDefinition = "varchar(255)")
+    @Column(nullable = false, length = 255)
     private String passwordHash;
 
-    @Column(length = 50, columnDefinition = "varchar(50)")
+    @Column(length = 50)
     private String firstName;
 
-    @Column(length = 50, columnDefinition = "varchar(50)")
+    @Column(length = 50)
     private String lastName;
 
-    @Column(length = 255, columnDefinition = "varchar(255)")
+    @Column(length = 255)
     private String profilePictureUrl;
 
     @Column(columnDefinition = "text")
@@ -44,55 +45,85 @@ public class User {
     @CreationTimestamp
     private LocalDateTime joinedDate;
 
-    private BigDecimal sellerRating;
-    private Integer sellerReviewsCount;
-    private Integer successfulTransactions;
+    @Column(precision = 3, scale = 2)
+    @Builder.Default
+    private BigDecimal sellerRating = BigDecimal.ZERO;
 
-    private Boolean isLegitProfile;
-    private Boolean isVerified;
+    @Builder.Default
+    private Integer sellerReviewsCount = 0;
 
-    private BigDecimal trustScore;
+    @Builder.Default
+    private Integer successfulTransactions = 0;
+
+    @Builder.Default
+    private Boolean isLegitProfile = false;
+
+    @Builder.Default
+    private Boolean isVerified = false;
+
+    @Column(length = 20)
+    @Builder.Default
+    private String accountStatus = "active";
+
+    @Column(precision = 3, scale = 2)
+    @Builder.Default
+    private BigDecimal trustScore = BigDecimal.ZERO;
+
     private LocalDateTime lastLoginAt;
 
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private List<UserAddress> addresses;
+    @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<UserAddress> addresses = new ArrayList<>();
 
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private List<UserMembership> memberships;
+    @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<UserMembership> memberships = new ArrayList<>();
 
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private List<UserRole> roles;
+    @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<UserRole> roles = new ArrayList<>();
 
-    @OneToMany(mappedBy = "seller", cascade = CascadeType.ALL)
-    private List<Product> products;
+    @OneToMany(mappedBy = "seller", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Product> products = new ArrayList<>();
 
-    @OneToMany(mappedBy = "buyer", cascade = CascadeType.ALL)
-    private List<Offer> offers;
+    @OneToMany(mappedBy = "buyer", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Offer> offers = new ArrayList<>();
 
-    @OneToMany(mappedBy = "buyer", cascade = CascadeType.ALL)
-    private List<Order> orders;
+    @OneToMany(mappedBy = "buyer", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Order> orders = new ArrayList<>();
 
-    @OneToMany(mappedBy = "seller", cascade = CascadeType.ALL)
-    private List<OrderItem> soldItems;
+    @OneToMany(mappedBy = "seller", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<OrderItem> soldItems = new ArrayList<>();
 
-    @OneToMany(mappedBy = "seller", cascade = CascadeType.ALL)
-    private List<Transaction> sellerTransactions;
+    @OneToMany(mappedBy = "seller", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Transaction> sellerTransactions = new ArrayList<>();
 
-    @OneToMany(mappedBy = "buyer", cascade = CascadeType.ALL)
-    private List<Transaction> buyerTransactions;
+    @OneToMany(mappedBy = "buyer", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Transaction> buyerTransactions = new ArrayList<>();
 
-    @OneToMany(mappedBy = "reviewer", cascade = CascadeType.ALL)
-    private List<Review> givenReviews;
+    @OneToMany(mappedBy = "reviewer", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Review> givenReviews = new ArrayList<>();
 
-    @OneToMany(mappedBy = "reviewedUser", cascade = CascadeType.ALL)
-    private List<Review> receivedReviews;
+    @OneToMany(mappedBy = "reviewedUser", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Review> receivedReviews = new ArrayList<>();
 
-    @OneToMany(mappedBy = "user", cascade = CascadeType.ALL)
-    private List<Notification> notifications;
+    @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<Notification> notifications = new ArrayList<>();
 
-    @OneToMany(mappedBy = "follower", cascade = CascadeType.ALL)
-    private List<UserFollow> following;
+    @OneToMany(mappedBy = "follower", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<UserFollow> following = new ArrayList<>();
 
-    @OneToMany(mappedBy = "following", cascade = CascadeType.ALL)
-    private List<UserFollow> followers;
+    @OneToMany(mappedBy = "followedUser", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @Builder.Default
+    private List<UserFollow> followers = new ArrayList<>();
 }
