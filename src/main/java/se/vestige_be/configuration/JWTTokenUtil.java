@@ -67,6 +67,12 @@ public class JWTTokenUtil {
         return createToken(claims, userDetails.getUsername(), jwtExpiration);
     }
 
+    public String generateToken(UserDetails userDetails, Map<String, Object> additionalClaims) {
+        Map<String, Object> claims = new HashMap<>(additionalClaims);
+        claims.put("typ", "access");
+        return createToken(claims, userDetails.getUsername(), jwtExpiration);
+    }
+
     // Create token
     private String createToken(Map<String, Object> claims, String subject, long expiration) {
         return Jwts.builder()

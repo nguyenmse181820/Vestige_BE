@@ -2,6 +2,7 @@ package se.vestige_be.configuration;
 
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -24,7 +25,7 @@ public class SecurityConfig {
     private final CustomUserDetailsService userDetailsService;
     private final JWTTokenUtil jwtTokenUtil;
 
-    public SecurityConfig(CustomUserDetailsService userDetailsService, JWTTokenUtil jwtTokenUtil) {
+    public SecurityConfig(@Lazy CustomUserDetailsService userDetailsService, JWTTokenUtil jwtTokenUtil) {
         this.userDetailsService = userDetailsService;
         this.jwtTokenUtil = jwtTokenUtil;
     }

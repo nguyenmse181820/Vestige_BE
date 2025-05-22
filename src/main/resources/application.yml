@@ -21,7 +21,7 @@ spring:
 jwt:
   secret: 91c2a21f3f6843a4bdb9d4ce86a44047dd938219d2158590a0c0a6ea7b563330
   expiration: 3600000
-  refresh-expiration: 604800000
+  refresh-expiration: 86400000
 
 # Swagger OpenAPI Configuration
 springdoc:

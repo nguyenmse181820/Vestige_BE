@@ -142,9 +142,16 @@ public class AuthController {
     @PostMapping("/logout-all")
     public ResponseEntity<?> logoutAllDevices(Authentication authentication) {
         if (authentication != null && authentication.isAuthenticated()) {
-            User user = userService.findByUsername(authentication.getName());
-            refreshTokenService.revokeAllUserTokens(user, "User requested logout from all devices");
-            return ResponseEntity.ok(Map.of("message", "Logged out from all devices successfully"));
+            String username = authentication.getName();
+            User user = userService.findByUsername(username);
+
+            if (user != null) {
+                refreshTokenService.revokeAllUserTokens(user, "User requested logout from all devices");
+                return ResponseEntity.ok(Map.of("message", "Logged out from all devices successfully"));
+            } else {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(Map.of("message", "User not found"));
+            }
         }
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
