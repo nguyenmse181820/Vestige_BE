@@ -1,0 +1,39 @@
+spring:
+  application:
+    name: Vestige_BE
+  task:
+    scheduling:
+      enabled: true
+  datasource:
+    url: jdbc:postgresql://localhost:5432/vestige
+    username: sa
+    password: 12345
+    driver-class-name: org.postgresql.Driver
+  jpa:
+    hibernate:
+      ddl-auto: update
+    properties:
+      hibernate:
+        dialect: org.hibernate.dialect.PostgreSQLDialect
+        format_sql: true
+    show-sql: true
+
+jwt:
+  secret: 91c2a21f3f6843a4bdb9d4ce86a44047dd938219d2158590a0c0a6ea7b563330
+  expiration: 3600000
+  refresh-expiration: 604800000
+
+# Swagger OpenAPI Configuration
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+  swagger-ui:
+    path: /swagger-ui.html
+    tags-sorter: alpha
+    operations-sorter: method
+    display-request-duration: true
+  packages-to-scan: se.vestige_be.controller
+  paths-to-match: /api/**
+  show-actuator: false
+  default-consumes-media-type: application/json
+  default-produces-media-type: application/json
