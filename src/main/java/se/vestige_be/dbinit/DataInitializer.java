@@ -39,7 +39,6 @@ public class DataInitializer implements CommandLineRunner {
                         .name("ADMIN")
                         .build());
 
-                // Save all roles
                 roleRepository.saveAll(roles);
 
                 System.out.println("Default roles have been created");

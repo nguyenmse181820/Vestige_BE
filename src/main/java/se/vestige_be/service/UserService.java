@@ -6,10 +6,8 @@ import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.request.RegisterRequest;
 import se.vestige_be.pojo.Role;
 import se.vestige_be.pojo.User;
-import se.vestige_be.pojo.UserRole;
 import se.vestige_be.repository.RoleRepository;
 import se.vestige_be.repository.UserRepository;
-import se.vestige_be.repository.UserRoleRepository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -22,17 +20,14 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
-    private final UserRoleRepository userRoleRepository;
     private final PasswordEncoder passwordEncoder;
 
     public UserService(
             UserRepository userRepository,
             RoleRepository roleRepository,
-            UserRoleRepository userRoleRepository,
             PasswordEncoder passwordEncoder) {
         this.userRepository = userRepository;
         this.roleRepository = roleRepository;
-        this.userRoleRepository = userRoleRepository;
         this.passwordEncoder = passwordEncoder;
     }
 
@@ -55,7 +50,6 @@ public class UserService {
 
     @Transactional
     public User register(RegisterRequest request) {
-        // Check if username or email already exists
         if (userRepository.existsByUsername(request.getUsername())) {
             throw new RuntimeException("Username already exists");
         }
@@ -64,7 +58,8 @@ public class UserService {
             throw new RuntimeException("Email already exists");
         }
 
-        // Create new user
+        Role userRole = roleRepository.findByName("USER").orElseThrow(() -> new RuntimeException("Role not found"));
+
         User user = User.builder()
                 .username(request.getUsername())
                 .email(request.getEmail())
@@ -81,20 +76,10 @@ public class UserService {
                 .joinedDate(LocalDateTime.now())
                 .addresses(new ArrayList<>())
                 .memberships(new ArrayList<>())
-                .roles(new ArrayList<>())
-                .build();
-
-        user = userRepository.save(user);
-
-        Role userRole = roleRepository.findByName("USER")
-                .orElseThrow(() -> new RuntimeException("Default role not found"));
-
-        UserRole role = UserRole.builder()
-                .user(user)
                 .role(userRole)
                 .build();
 
-        userRoleRepository.save(role);
+        user = userRepository.save(user);
 
         return user;
     }

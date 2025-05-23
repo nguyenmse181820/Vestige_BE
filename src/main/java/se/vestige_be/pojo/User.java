@@ -79,9 +79,10 @@ public class User {
     @Builder.Default
     private List<UserMembership> memberships = new ArrayList<>();
 
-    @OneToMany(mappedBy = "user", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
-    @Builder.Default
-    private List<UserRole> roles = new ArrayList<>();
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "role_id")
+    @ToString.Exclude
+    private Role role;
 
     @OneToMany(mappedBy = "seller", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
     @Builder.Default
