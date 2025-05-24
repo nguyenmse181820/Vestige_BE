@@ -1,9 +1,12 @@
 package se.vestige_be.service;
 
+import jakarta.persistence.EntityNotFoundException;
+import lombok.AllArgsConstructor;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.request.RegisterRequest;
+import se.vestige_be.dto.request.UpdateProfileRequest;
 import se.vestige_be.pojo.Role;
 import se.vestige_be.pojo.User;
 import se.vestige_be.repository.RoleRepository;
@@ -13,31 +16,24 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Optional;
 
 @Service
+@AllArgsConstructor
 public class UserService {
 
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final PasswordEncoder passwordEncoder;
 
-    public UserService(
-            UserRepository userRepository,
-            RoleRepository roleRepository,
-            PasswordEncoder passwordEncoder) {
-        this.userRepository = userRepository;
-        this.roleRepository = roleRepository;
-        this.passwordEncoder = passwordEncoder;
-    }
 
     public User findByUsername(String username) {
         return userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found with username: " + username));
     }
 
-    public Optional<User> findById(Long userId) {
-        return userRepository.findById(userId);
+    public User findById(Long userId) {
+        return userRepository.findById(userId)
+                .orElseThrow(() -> new EntityNotFoundException("User not found with userId: " + userId));
     }
 
     public boolean existsByUsername(String username) {
@@ -85,12 +81,7 @@ public class UserService {
     }
 
     @Transactional
-    public User updateUser(User user) {
-        return userRepository.save(user);
-    }
-
-    @Transactional
-    public User updateLastLogin(String username) {
+    public User processLogin(String username) {
         User user = findByUsername(username);
         user.setLastLoginAt(LocalDateTime.now());
         return userRepository.save(user);
@@ -106,23 +97,22 @@ public class UserService {
     }
 
     @Transactional
-    public User changePassword(Long userId, String newPassword) {
+    public User updateProfile(Long userId, UpdateProfileRequest request) {
         User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found with id: " + userId));
+                .orElseThrow(() -> new EntityNotFoundException("User not found with id: " + userId));
 
-        user.setPasswordHash(passwordEncoder.encode(newPassword));
-        return userRepository.save(user);
-    }
-
-    @Transactional
-    public User updateProfile(Long userId, String firstName, String lastName, String bio, String profilePictureUrl) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new RuntimeException("User not found with id: " + userId));
-
-        user.setFirstName(firstName);
-        user.setLastName(lastName);
-        user.setBio(bio);
-        user.setProfilePictureUrl(profilePictureUrl);
+        if (request.hasFirstName()) {
+            user.setFirstName(request.getFirstName());
+        }
+        if (request.hasLastName()) {
+            user.setLastName(request.getLastName());
+        }
+        if (request.hasBio()) {
+            user.setBio(request.getBio());
+        }
+        if (request.hasProfilePictureUrl()) {
+            user.setProfilePictureUrl(request.getProfilePictureUrl());
+        }
 
         return userRepository.save(user);
     }

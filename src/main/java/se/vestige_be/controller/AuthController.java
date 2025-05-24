@@ -2,6 +2,8 @@ package se.vestige_be.controller;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
 import jakarta.servlet.http.HttpServletRequest;
+import jakarta.validation.Valid;
+import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
@@ -14,6 +16,7 @@ import se.vestige_be.dto.request.AuthRequest;
 import se.vestige_be.dto.request.RegisterRequest;
 import se.vestige_be.dto.response.AuthResponse;
 import se.vestige_be.dto.request.RefreshTokenRequest;
+import se.vestige_be.dto.response.ObjectResponse;
 import se.vestige_be.exception.TokenPossibleCompromiseException;
 import se.vestige_be.exception.TokenRefreshException;
 import se.vestige_be.pojo.RefreshToken;
@@ -23,11 +26,13 @@ import se.vestige_be.service.CustomUserDetailsService;
 import se.vestige_be.service.RefreshTokenService;
 import se.vestige_be.service.UserService;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 @RestController
 @RequestMapping("/api/auth")
 @Tag(name = "Authentication", description = "API for user authentication and token management")
+@AllArgsConstructor
 public class AuthController {
 
     private final AuthenticationManager authenticationManager;
@@ -36,21 +41,8 @@ public class AuthController {
     private final CustomUserDetailsService userDetailsService;
     private final RefreshTokenService refreshTokenService;
 
-    public AuthController(
-            AuthenticationManager authenticationManager,
-            JWTTokenUtil jwtTokenUtil,
-            UserService userService, CustomUserDetailsService userDetailsService,
-            RefreshTokenService refreshTokenService) {
-        this.authenticationManager = authenticationManager;
-        this.jwtTokenUtil = jwtTokenUtil;
-        this.userService = userService;
-        this.userDetailsService = userDetailsService;
-        this.refreshTokenService = refreshTokenService;
-    }
-
     @PostMapping("/login")
-    public ResponseEntity<AuthResponse> login(@RequestBody AuthRequest loginRequest) {
-        // Authenticate the user
+    public ResponseEntity<AuthResponse> login(@Valid @RequestBody AuthRequest loginRequest) {
         Authentication authentication = authenticationManager.authenticate(
                 new UsernamePasswordAuthenticationToken(
                         loginRequest.getUsername(),
@@ -60,12 +52,9 @@ public class AuthController {
 
         SecurityContextHolder.getContext().setAuthentication(authentication);
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();
-        User user = userService.findByUsername(userDetails.getUsername());
+        User user = userService.processLogin(userDetails.getUsername());
 
-        // Generate access token
         String accessToken = jwtTokenUtil.generateToken(userDetails);
-
-        // Create new refresh token (with new family)
         RefreshToken refreshToken = refreshTokenService.createNewRefreshTokenFamily(userDetails.getUsername());
 
         return ResponseEntity.ok(AuthResponse.builder()
@@ -88,10 +77,7 @@ public class AuthController {
 
                             User user = refreshToken.getUser();
                             UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
-
                             String accessToken = jwtTokenUtil.generateToken(userDetails);
-
-                            // Rotate refresh token (revoke current one, create new one)
                             RefreshToken newRefreshToken = refreshTokenService.rotateRefreshToken(refreshToken);
 
                             return ResponseEntity.ok(AuthResponse.builder()
@@ -102,23 +88,22 @@ public class AuthController {
                                     .build());
                         } catch (TokenPossibleCompromiseException ex) {
                             refreshTokenService.handlePossibleTokenTheft(ex, refreshToken.getUser().getUsername());
-                            logSecurityEvent(servletRequest, "Token theft detected",
-                                    refreshToken.getUser().getUsername());
+                            logSecurityEvent(servletRequest, "Token theft detected", refreshToken.getUser().getUsername());
 
-                            return ResponseEntity
-                                    .status(HttpStatus.FORBIDDEN)
-                                    .body(Map.of(
-                                            "error", "Security alert",
-                                            "message", "Your session has been terminated due to suspicious activity. Please login again."
-                                    ));
+                            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                                    .body(ObjectResponse.builder()
+                                            .status("error")
+                                            .message("Your session has been terminated due to suspicious activity. Please login again.")
+                                            .build());
                         }
                     })
-                    .orElseThrow(() -> new TokenRefreshException(requestRefreshToken,
-                            "Refresh token not found in database"));
+                    .orElseThrow(() -> new TokenRefreshException(requestRefreshToken, "Refresh token not found in database"));
         } catch (TokenRefreshException e) {
-            return ResponseEntity
-                    .status(HttpStatus.FORBIDDEN)
-                    .body(Map.of("error", "Invalid token", "message", e.getMessage()));
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ObjectResponse.builder()
+                            .status("error")
+                            .message(e.getMessage())
+                            .build());
         }
     }
 
@@ -127,15 +112,24 @@ public class AuthController {
         String refreshToken = request.getRefreshToken();
 
         if (refreshToken == null) {
-            return ResponseEntity.badRequest().body(Map.of("message", "Refresh token is required"));
+            return ResponseEntity.badRequest()
+                    .body(ObjectResponse.builder()
+                            .status("error")
+                            .message("Refresh token is required")
+                            .build());
         }
 
         try {
             refreshTokenService.revokeToken(refreshToken, "User logout");
-            return ResponseEntity.ok(Map.of("message", "Logged out successfully"));
+            return ResponseEntity.ok(ObjectResponse.builder()
+                    .status("success")
+                    .message("Logged out successfully")
+                    .build());
         } catch (Exception e) {
-            // Even if token doesn't exist, we consider logout successful
-            return ResponseEntity.ok(Map.of("message", "Logged out successfully"));
+            return ResponseEntity.ok(ObjectResponse.builder()
+                    .status("success")
+                    .message("Logged out successfully")
+                    .build());
         }
     }
 
@@ -147,36 +141,45 @@ public class AuthController {
 
             if (user != null) {
                 refreshTokenService.revokeAllUserTokens(user, "User requested logout from all devices");
-                return ResponseEntity.ok(Map.of("message", "Logged out from all devices successfully"));
+                return ResponseEntity.ok(ObjectResponse.builder()
+                        .status("success")
+                        .message("Logged out from all devices successfully")
+                        .build());
             } else {
                 return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                        .body(Map.of("message", "User not found"));
+                        .body(ObjectResponse.builder()
+                                .status("error")
+                                .message("User not found")
+                                .build());
             }
         }
 
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
-                .body(Map.of("message", "Not authenticated"));
+                .body(ObjectResponse.builder()
+                        .status("error")
+                        .message("Not authenticated")
+                        .build());
     }
 
     @PostMapping("/register")
-    public ResponseEntity<?> register(@RequestBody RegisterRequest registerRequest) {
+    public ResponseEntity<?> register(@Valid @RequestBody RegisterRequest registerRequest) {
         if (userService.existsByUsername(registerRequest.getUsername())) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(Map.of("message", "Username is already taken!"));
+            return ResponseEntity.badRequest()
+                    .body(ObjectResponse.builder()
+                            .status("error")
+                            .message("Username is already taken!")
+                            .build());
         }
 
-        // Check if email already exists
         if (userService.existsByEmail(registerRequest.getEmail())) {
-            return ResponseEntity
-                    .badRequest()
-                    .body(Map.of("message", "Email is already in use!"));
+            return ResponseEntity.badRequest()
+                    .body(ObjectResponse.builder()
+                            .status("error")
+                            .message("Email is already in use!")
+                            .build());
         }
 
-        // Create new user
         User user = userService.register(registerRequest);
-
-        // Generate authentication tokens
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
         String accessToken = jwtTokenUtil.generateToken(userDetails);
         RefreshToken refreshToken = refreshTokenService.createNewRefreshTokenFamily(userDetails.getUsername());

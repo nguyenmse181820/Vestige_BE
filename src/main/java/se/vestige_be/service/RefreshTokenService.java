@@ -60,7 +60,6 @@ public class RefreshTokenService {
     // Create child token (rotation)
     @Transactional
     public RefreshToken rotateRefreshToken(RefreshToken currentToken) {
-        // First, check if token has already been used (possible theft)
         if (currentToken.isRevoked()) {
             throw new TokenPossibleCompromiseException(
                     currentToken.getToken(),
