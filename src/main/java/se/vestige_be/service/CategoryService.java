@@ -76,6 +76,25 @@ public class CategoryService {
         return categoryRepository.save(existingCategory);
     }
 
+    @Transactional
+    public void deleteCategory(Integer categoryId) {
+        Category category = findById(categoryId)
+                .orElseThrow(() -> new EntityNotFoundException("Category with id '" + categoryId + "' not found"));
+
+        List<Category> subcategories = findByParentCategory(categoryId);
+        if (!subcategories.isEmpty()) {
+            throw new RuntimeException("Cannot delete category '" + category.getName() +
+                    "': has " + subcategories.size() + " subcategories. Delete subcategories first.");
+        }
+        if (!category.getProducts().isEmpty()) {
+            throw new RuntimeException("Cannot delete category '" + category.getName() +
+                    "': has " + category.getProducts().size() + " associated products. " +
+                    "Move or delete products first.");
+        }
+
+        categoryRepository.deleteById(categoryId);
+    }
+
     private boolean isCircularReference(Integer categoryId, Integer parentCategoryId) {
         if (categoryId.equals(parentCategoryId)) {
             return true;

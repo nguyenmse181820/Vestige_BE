@@ -1,6 +1,7 @@
 package se.vestige_be.controller;
 
 import io.swagger.v3.oas.annotations.tags.Tag;
+import jakarta.validation.Valid;
 import lombok.AllArgsConstructor;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
@@ -25,9 +26,9 @@ public class CategoryController {
     public ResponseEntity<?> createNewCategory(
             @RequestBody CategoryRequest request
     ) {
-        return ResponseEntity.ok(
+        return ResponseEntity.status(HttpStatus.CREATED).body(
                 ObjectResponse.builder()
-                        .status(HttpStatus.OK.toString())
+                        .status(HttpStatus.CREATED.toString())
                         .message("Category created")
                         .data(categoryService.createCategory(
                                 request.getName(),
@@ -39,7 +40,7 @@ public class CategoryController {
     }
 
     @PatchMapping("/{id}")
-    public ResponseEntity<?> updateCategory(@PathVariable Integer id, @RequestBody CategoryRequest request) {
+    public ResponseEntity<?> updateCategory(@Valid @PathVariable Integer id, @RequestBody CategoryRequest request) {
         return ResponseEntity.ok(
                 ObjectResponse.builder()
                         .data(categoryService.updateCategory(
@@ -47,6 +48,18 @@ public class CategoryController {
                                 request.getName(),
                                 request.getDescription(),
                                 request.getParentCategoryId()))
+                        .build()
+        );
+    }
+
+    @DeleteMapping("/{id}")
+    public ResponseEntity<?> deleteCategory(@PathVariable Integer id) {
+        categoryService.deleteCategory(id);
+        return ResponseEntity.ok(
+                ObjectResponse.builder()
+                        .status(HttpStatus.OK.toString())
+                        .message("Category deleted successfully")
+                        .data(null)
                         .build()
         );
     }

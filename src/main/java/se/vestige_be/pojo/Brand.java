@@ -26,9 +26,6 @@ public class Brand {
     @Column(length = 255)
     private String logoUrl;
 
-    @Builder.Default
-    private Boolean isVerified = false;
-
     @CreationTimestamp
     private LocalDateTime createdAt;
 
