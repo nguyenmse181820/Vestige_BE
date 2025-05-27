@@ -1,0 +1,54 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Vestige Chat</title>
+  <link href="/css/chat.css" rel="stylesheet">
+</head>
+<body>
+<!-- Login Form -->
+<div id="login-container" class="login-form">
+  <h2>Login to Vestige Chat</h2>
+  <form id="loginForm">
+    <input type="text" id="username" placeholder="Username" required>
+    <input type="password" id="password" placeholder="Password" required>
+    <input type="number" id="conversationId" placeholder="Conversation ID" required>
+    <button type="submit">Login & Join Chat</button>
+  </form>
+</div>
+
+<!-- Chat Interface -->
+<div id="chat-container" class="chat-container hidden">
+  <div class="chat-header">
+    <h2>Vestige Chat - Conversation <span id="currentConversationId"></span></h2>
+    <span id="connectionStatus" class="connection-status disconnected">Disconnected</span>
+  </div>
+
+  <div id="messagesContainer" class="messages-container">
+    <!-- Messages will be displayed here -->
+  </div>
+
+  <div class="message-input-container">
+    <input
+            type="text"
+            id="messageInput"
+            class="message-input"
+            placeholder="Type your message..."
+            maxlength="1000"
+    >
+    <button id="sendButton" class="send-button" disabled>
+      <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+        <line x1="22" y1="2" x2="11" y2="13"></line>
+        <polygon points="22,2 15,22 11,13 2,9 22,2"></polygon>
+      </svg>
+    </button>
+  </div>
+</div>
+
+<!-- JavaScript -->
+<script src="https://cdnjs.cloudflare.com/ajax/libs/sockjs-client/1.6.1/sockjs.min.js"></script>
+<script src="https://cdnjs.cloudflare.com/ajax/libs/stomp.js/2.3.3/stomp.min.js"></script>
+<script src="/js/chat.js"></script>
+</body>
+</html>

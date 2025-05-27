@@ -48,12 +48,21 @@ public class SecurityConfig {
                         .requestMatchers("/api/categories/**").permitAll()
                         .requestMatchers("/api/brands/**").permitAll()
 
+                        // WebSocket endpoints - Allow for initial connection
+                        .requestMatchers("/ws/**").permitAll()
+
                         // Swagger UI and API docs
                         .requestMatchers("/swagger-ui.html").permitAll()
                         .requestMatchers("/swagger-ui/**").permitAll()
                         .requestMatchers("/v3/api-docs/**").permitAll()
                         .requestMatchers("/swagger-resources/**").permitAll()
                         .requestMatchers("/webjars/**").permitAll()
+
+                        // Static resources (for chat UI)
+                        .requestMatchers("/css/**", "/js/**", "/static/chat.html").permitAll()
+
+                        // Chat API endpoints require authentication
+                        .requestMatchers("/api/chat/**").authenticated()
 
                         // Require authentication for all other requests
                         .anyRequest().authenticated()
