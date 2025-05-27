@@ -22,16 +22,16 @@ public class CategoryService {
         return CategoryResponse.fromEntityList(categories);
     }
 
-    public Optional<Category> findById(Integer id) {
+    public Optional<Category> findById(Long id) {
         return categoryRepository.findById(id);
     }
 
-    public List<Category> findByParentCategory(Integer parentCategoryId) {
+    public List<Category> findByParentCategory(Long parentCategoryId) {
         return categoryRepository.findByParentCategory_CategoryId(parentCategoryId);
     }
 
     @Transactional
-    public Category createCategory(String name, String description, Integer parentCategoryId) {
+    public Category createCategory(String name, String description, Long parentCategoryId) {
         Category parentCategory = null;
         if(parentCategoryId != null) {
             parentCategory = findById(parentCategoryId).orElseThrow(() -> new EntityNotFoundException("Parent category not found with id: " + parentCategoryId));
@@ -49,7 +49,7 @@ public class CategoryService {
     }
 
     @Transactional
-    public Category updateCategory(Integer id, String name, String description, Integer parentCategoryId) {
+    public Category updateCategory(Long id, String name, String description, Long parentCategoryId) {
         Category existingCategory = findById(id)
                 .orElseThrow(() -> new EntityNotFoundException("Category with id '" + id + "' not found"));
 
@@ -77,7 +77,7 @@ public class CategoryService {
     }
 
     @Transactional
-    public void deleteCategory(Integer categoryId) {
+    public void deleteCategory(Long categoryId) {
         Category category = findById(categoryId)
                 .orElseThrow(() -> new EntityNotFoundException("Category with id '" + categoryId + "' not found"));
 
@@ -95,7 +95,7 @@ public class CategoryService {
         categoryRepository.deleteById(categoryId);
     }
 
-    private boolean isCircularReference(Integer categoryId, Integer parentCategoryId) {
+    private boolean isCircularReference(Long categoryId, Long parentCategoryId) {
         if (categoryId.equals(parentCategoryId)) {
             return true;
         }

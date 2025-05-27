@@ -1,18 +1,47 @@
-version: '3.8'
-
 services:
   postgres:
-    image: postgres:latest
+    image: postgres:15-alpine
     container_name: vestige-postgres
     environment:
-      POSTGRES_DB: vestige
-      POSTGRES_USER: sa
-      POSTGRES_PASSWORD: 12345
+      POSTGRES_DB: vestige_db
+      POSTGRES_USER: ${DATABASE_USERNAME:sa}
+      POSTGRES_PASSWORD: ${DATABASE_PASSWORD}
     ports:
       - "5432:5432"
     volumes:
-      - postgres-data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - vestige-network
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U vestige_user -d vestige_db"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  app:
+    build:
+      context: .
+    container_name: vestige-app
+    environment:
+      - SPRING_PROFILES_ACTIVE=dev
+      - SPRING_DATASOURCE_URL=jdbc:postgresql://postgres:5432/vestige
+      - SPRING_DATASOURCE_USERNAME=${DATABASE_USERNAME:sa}
+      - SPRING_DATASOURCE_PASSWORD=${DATABASE_PASSWORD}
+      - JWT_SECRET=${JWT_SECRET}
+    ports:
+      - "8080:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - vestige-network
+    volumes:
+      - ./uploads:/app/uploads
     restart: unless-stopped
 
 volumes:
-  postgres-data:
+  postgres_data:
+
+networks:
+  vestige-network:
+    driver: bridge
