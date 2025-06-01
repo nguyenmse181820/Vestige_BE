@@ -15,6 +15,7 @@ import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
+import org.springframework.web.cors.CorsConfigurationSource;
 import se.vestige_be.service.CustomUserDetailsService;
 
 @Configuration
@@ -24,10 +25,14 @@ public class SecurityConfig {
 
     private final CustomUserDetailsService userDetailsService;
     private final JWTTokenUtil jwtTokenUtil;
+    private final CorsConfigurationSource corsConfigurationSource;
 
-    public SecurityConfig(@Lazy CustomUserDetailsService userDetailsService, JWTTokenUtil jwtTokenUtil) {
+    public SecurityConfig(@Lazy CustomUserDetailsService userDetailsService,
+                          JWTTokenUtil jwtTokenUtil,
+                          CorsConfigurationSource corsConfigurationSource) {
         this.userDetailsService = userDetailsService;
         this.jwtTokenUtil = jwtTokenUtil;
+        this.corsConfigurationSource = corsConfigurationSource;
     }
 
     @Bean
@@ -38,7 +43,12 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
+                // Enable CORS
+                .cors(cors -> cors.configurationSource(corsConfigurationSource))
+
+                // Disable CSRF
                 .csrf(csrf -> csrf.disable())
+
                 .authorizeHttpRequests(auth -> auth
                         // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
@@ -49,6 +59,7 @@ public class SecurityConfig {
                         .requestMatchers("/api/brands/**").permitAll()
 
                         // WebSocket endpoints - Allow for initial connection
+                        .requestMatchers("/chat/**").permitAll()
                         .requestMatchers("/ws/**").permitAll()
 
                         // Swagger UI and API docs
@@ -58,8 +69,11 @@ public class SecurityConfig {
                         .requestMatchers("/swagger-resources/**").permitAll()
                         .requestMatchers("/webjars/**").permitAll()
 
-                        // Static resources (for chat UI)
-                        .requestMatchers("/css/**", "/js/**", "/static/chat.html").permitAll()
+                        // Actuator endpoints (for health check)
+                        .requestMatchers("/actuator/**").permitAll()
+
+                        // Static resources
+                        .requestMatchers("/css/**", "/js/**", "/static/**").permitAll()
 
                         // Chat API endpoints require authentication
                         .requestMatchers("/api/chat/**").authenticated()

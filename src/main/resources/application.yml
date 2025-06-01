@@ -1,3 +1,4 @@
+# Thêm vào application.yml hiện có
 spring:
   application:
     name: Vestige_BE
@@ -17,6 +18,27 @@ spring:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
     show-sql: false
+
+  # CORS Configuration (optional, đã có trong CorsConfig.java)
+  web:
+    cors:
+      allowed-origins:
+        - "http://localhost:3000"
+        - "http://127.0.0.1:3000"
+      allowed-methods: "*"
+      allowed-headers: "*"
+      allow-credentials: true
+      max-age: 3600
+
+# Management endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      cors:
+        allowed-origins: "http://localhost:3000"
+        allowed-methods: "GET,POST"
 
 jwt:
   secret: ${JWT_SECRET}
