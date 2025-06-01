@@ -1,13 +1,13 @@
 package se.vestige_be.dto.request;
 
-import jakarta.validation.constraints.Email;
-import jakarta.validation.constraints.NotBlank;
-import jakarta.validation.constraints.Pattern;
-import jakarta.validation.constraints.Size;
+import jakarta.validation.constraints.*;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import se.vestige_be.pojo.enums.Gender;
+
+import java.time.LocalDate;
 
 @Data
 @Builder
@@ -39,4 +39,13 @@ public class RegisterRequest {
     @Size(min = 1, max = 50, message = "Last name must be between 1 and 50 characters")
     @Pattern(regexp = "^[a-zA-ZÀ-ÿ\\s'-]+$", message = "Last name can only contain letters, spaces, apostrophes and hyphens")
     private String lastName;
+
+    @NotBlank(message = "Phone number is required")
+    @Pattern(regexp = "^[+]?[0-9\\s-()]+$", message = "Please provide a valid phone number")
+    @Size(max = 20, message = "Phone number must not exceed 20 characters")
+    private String phoneNumber;
+
+    private LocalDate dateOfBirth;
+
+    private Gender gender;
 }

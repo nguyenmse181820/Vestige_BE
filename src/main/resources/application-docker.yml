@@ -5,18 +5,22 @@ spring:
     scheduling:
       enabled: true
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/vestige}
-    username: ${DATABASE_USERNAME:postgres}
+    url: jdbc:postgresql://postgres:5432/vestige
+    username: ${DATABASE_USERNAME:sa}
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
   jpa:
     hibernate:
-      ddl-auto: update
+      ddl-auto: create-drop
+    defer-datasource-initialization: true
     properties:
       hibernate:
         dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
     show-sql: false
+  sql:
+    init:
+      mode: never
 
 jwt:
   secret: ${JWT_SECRET}
@@ -47,3 +51,13 @@ springdoc:
   show-actuator: false
   default-consumes-media-type: application/json
   default-produces-media-type: application/json
+
+# Actuator for health checks
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+  endpoint:
+    health:
+      show-details: when_authorized

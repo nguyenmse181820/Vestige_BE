@@ -10,6 +10,7 @@ import org.springframework.security.config.annotation.authentication.configurati
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.config.http.SessionCreationPolicy;
 import org.springframework.security.crypto.bcrypt.BCryptPasswordEncoder;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -38,15 +39,23 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                .csrf(csrf -> csrf.disable())
+                .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
                         // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
 
-                        // Public API endpoints
+                        // Public API endpoints (can be accessed without authentication)
                         .requestMatchers("/api/products/**").permitAll()
                         .requestMatchers("/api/categories/**").permitAll()
                         .requestMatchers("/api/brands/**").permitAll()
+                        .requestMatchers("/api/users/{id}").permitAll() // Public user profiles
+
+                        // Protected endpoints (require authentication)
+                        .requestMatchers("/api/users/profile/**").authenticated()
+                        .requestMatchers("/api/users/addresses/**").authenticated()
+                        .requestMatchers("/api/orders/**").authenticated()
+                        .requestMatchers("/api/offers/**").authenticated()
+                        .requestMatchers("/api/transactions/**").authenticated()
 
                         // Swagger UI and API docs
                         .requestMatchers("/swagger-ui.html").permitAll()

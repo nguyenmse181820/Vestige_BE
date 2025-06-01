@@ -27,22 +27,18 @@ public class ProductListResponse {
     private Integer likesCount;
     private LocalDateTime createdAt;
 
-    // Seller info
     private Long sellerId;
     private String sellerUsername;
     private Boolean sellerIsLegitProfile;
     private BigDecimal sellerRating;
 
-    // Category and Brand
     private Long categoryId;
     private String categoryName;
     private Long brandId;
     private String brandName;
 
-    // Primary image
     private String primaryImageUrl;
 
-    // Additional calculated fields
     private BigDecimal discountPercentage;
     private Boolean hasDiscount;
 }

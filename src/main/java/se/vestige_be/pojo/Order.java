@@ -44,10 +44,11 @@ public class Order {
     private LocalDateTime createdAt;
 
     private LocalDateTime paidAt;
+    private LocalDateTime shippedAt;
+    private LocalDateTime deliveredAt;
 
-    @OneToMany(mappedBy = "order", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
     @ToString.Exclude
     private List<OrderItem> orderItems = new ArrayList<>();
-
 }

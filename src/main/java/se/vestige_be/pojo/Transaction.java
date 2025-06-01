@@ -24,7 +24,7 @@ public class Transaction {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long transactionId;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @OneToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "order_item_id")
     @ToString.Exclude
     private OrderItem orderItem;
@@ -91,7 +91,7 @@ public class Transaction {
     private LocalDateTime shippedAt;
     private LocalDateTime deliveredAt;
 
-    @OneToMany(mappedBy = "transaction", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
+    @OneToMany(mappedBy = "transaction", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default
     @ToString.Exclude
     private List<ShippingOrder> shippingOrders = new ArrayList<>();

@@ -12,6 +12,8 @@ public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpeci
 
     Page<Product> findBySellerUserId(Long sellerId, Pageable pageable);
 
+    Long countBySellerUserId(Long sellerId);
+
     Long countBySellerUserIdAndStatus(Long sellerId, ProductStatus status);
 
     boolean existsBySellerUserIdAndTitle(Long sellerId, String title);

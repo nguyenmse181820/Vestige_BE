@@ -22,6 +22,43 @@ import java.util.Map;
 @Slf4j
 public class GlobalExceptionHandler {
 
+    // ✅ Add custom exception handlers BEFORE RuntimeException
+    @ExceptionHandler(ResourceNotFoundException.class)
+    public ResponseEntity<ObjectResponse> handleResourceNotFound(ResourceNotFoundException ex) {
+        log.warn("Resource not found: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                .body(ObjectResponse.builder()
+                        .status(HttpStatus.NOT_FOUND.toString())
+                        .message(ex.getMessage())
+                        .data(null)
+                        .build());
+    }
+
+    @ExceptionHandler(BusinessLogicException.class)
+    public ResponseEntity<ObjectResponse> handleBusinessLogic(BusinessLogicException ex) {
+        log.warn("Business logic violation: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ObjectResponse.builder()
+                        .status(HttpStatus.BAD_REQUEST.toString())
+                        .message(ex.getMessage())
+                        .data(null)
+                        .build());
+    }
+
+    @ExceptionHandler(UnauthorizedException.class)
+    public ResponseEntity<ObjectResponse> handleUnauthorized(UnauthorizedException ex) {
+        log.warn("Unauthorized access: {}", ex.getMessage());
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ObjectResponse.builder()
+                        .status(HttpStatus.FORBIDDEN.toString())
+                        .message(ex.getMessage())
+                        .data(null)
+                        .build());
+    }
+
     @ExceptionHandler(TokenRefreshException.class)
     public ResponseEntity<Object> handleTokenRefreshException(
             TokenRefreshException ex, WebRequest request) {
@@ -57,12 +94,12 @@ public class GlobalExceptionHandler {
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", Instant.now());
         body.put("status", HttpStatus.UNAUTHORIZED.value());
-        body.put("error", "Unauthorized");
         body.put("message", "Invalid username or password");
         body.put("path", request.getDescription(false).substring(4));
 
         return new ResponseEntity<>(body, HttpStatus.UNAUTHORIZED);
     }
+
     @ExceptionHandler(MethodArgumentNotValidException.class)
     public ResponseEntity<Map<String, Object>> handleValidationErrors(MethodArgumentNotValidException ex) {
         Map<String, Object> response = new HashMap<>();
@@ -72,12 +109,13 @@ public class GlobalExceptionHandler {
                 errors.put(error.getField(), error.getDefaultMessage())
         );
 
-        response.put("success", false);
+        response.put("status", HttpStatus.BAD_REQUEST.toString());
         response.put("message", "Validation failed");
         response.put("errors", errors);
 
         return ResponseEntity.badRequest().body(response);
     }
+
     @ExceptionHandler(EntityNotFoundException.class)
     public ResponseEntity<ObjectResponse> handleEntityNotFound(EntityNotFoundException ex) {
         log.warn("Entity not found: {}", ex.getMessage());
@@ -85,18 +123,6 @@ public class GlobalExceptionHandler {
         return ResponseEntity.status(HttpStatus.NOT_FOUND)
                 .body(ObjectResponse.builder()
                         .status(HttpStatus.NOT_FOUND.toString())
-                        .message(ex.getMessage())
-                        .data(null)
-                        .build());
-    }
-
-    @ExceptionHandler(RuntimeException.class)
-    public ResponseEntity<ObjectResponse> handleRuntimeException(RuntimeException ex) {
-        log.error("Runtime exception: {}", ex.getMessage(), ex);
-
-        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                .body(ObjectResponse.builder()
-                        .status(HttpStatus.BAD_REQUEST.toString())
                         .message(ex.getMessage())
                         .data(null)
                         .build());
@@ -112,13 +138,12 @@ public class GlobalExceptionHandler {
             errors.put(propertyPath, violation.getMessage());
         });
 
-        response.put("success", false);
+        response.put("status", HttpStatus.BAD_REQUEST.toString());
         response.put("message", "Validation failed");
         response.put("errors", errors);
 
         return ResponseEntity.badRequest().body(response);
     }
-
 
     @ExceptionHandler(MethodArgumentTypeMismatchException.class)
     public ResponseEntity<ObjectResponse> handleTypeMismatch(MethodArgumentTypeMismatchException ex) {
@@ -138,6 +163,41 @@ public class GlobalExceptionHandler {
     public ResponseEntity<ObjectResponse> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("Illegal argument: {}", ex.getMessage());
 
+        return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                .body(ObjectResponse.builder()
+                        .status(HttpStatus.BAD_REQUEST.toString())
+                        .message(ex.getMessage())
+                        .data(null)
+                        .build());
+    }
+
+    // ✅ Improved RuntimeException handler - more specific handling
+    @ExceptionHandler(RuntimeException.class)
+    public ResponseEntity<ObjectResponse> handleRuntimeException(RuntimeException ex) {
+        log.error("Runtime exception: {}", ex.getMessage(), ex);
+
+        // Check message content to determine appropriate response
+        String message = ex.getMessage().toLowerCase();
+
+        if (message.contains("not found")) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ObjectResponse.builder()
+                            .status(HttpStatus.NOT_FOUND.toString())
+                            .message(ex.getMessage())
+                            .data(null)
+                            .build());
+        }
+
+        if (message.contains("unauthorized") || message.contains("permission") || message.contains("access denied")) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(ObjectResponse.builder()
+                            .status(HttpStatus.FORBIDDEN.toString())
+                            .message(ex.getMessage())
+                            .data(null)
+                            .build());
+        }
+
+        // Default to bad request for other runtime exceptions
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ObjectResponse.builder()
                         .status(HttpStatus.BAD_REQUEST.toString())
