@@ -1,8 +1,8 @@
-
 // src/main/java/se/vestige_be/service/SimpleChatService.java
 package se.vestige_be.service;
 
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.response.SimpleChatRecipientResponse;
@@ -20,6 +20,7 @@ import java.util.stream.Collectors;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class SimpleChatService {
 
     private final ConversationRepository conversationRepository;
@@ -27,41 +28,111 @@ public class SimpleChatService {
     private final UserRepository userRepository;
 
     /**
-     * Lấy danh sách người đã từng chat
+     * Lấy tất cả users có thể chat (trừ current user)
      */
+    @Transactional(readOnly = true)
+    public List<User> getAllUsersExcept(Long currentUserId) {
+        log.info("Getting all users except userId: {}", currentUserId);
+
+        List<User> allUsers = userRepository.findAll();
+        log.info("Total users in database: {}", allUsers.size());
+
+        List<User> filteredUsers = allUsers.stream()
+                .filter(user -> !user.getUserId().equals(currentUserId))
+                .collect(Collectors.toList());
+
+        log.info("Users after filtering (excluding current user): {}", filteredUsers.size());
+
+        // Log user details for debugging
+        filteredUsers.forEach(user ->
+                log.info("User: ID={}, username={}, firstName={}, lastName={}",
+                        user.getUserId(), user.getUsername(), user.getFirstName(), user.getLastName())
+        );
+
+        return filteredUsers;
+    }
+
+    /**
+     * Tạo hoặc lấy conversation giữa 2 users
+     */
+    @Transactional
+    public Conversation getOrCreateConversation(Long userId, Long recipientId) {
+        log.info("Getting or creating conversation between userId: {} and recipientId: {}", userId, recipientId);
+
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new RuntimeException("User not found with ID: " + userId));
+        User recipient = userRepository.findById(recipientId)
+                .orElseThrow(() -> new RuntimeException("Recipient not found with ID: " + recipientId));
+
+        log.info("Found user: {} and recipient: {}", user.getUsername(), recipient.getUsername());
+
+        return getOrCreateConversation(user, recipient);
+    }
+
+    /**
+     * Lấy danh sách người đã từng chat - COMPLETELY AVOID accessing messages collection
+     */
+    @Transactional(readOnly = true)
     public List<SimpleChatRecipientResponse> getChatRecipients(Long userId) {
+        log.info("Getting chat recipients for userId: {}", userId);
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
         List<Conversation> conversations = conversationRepository.findByUserOrderByLastMessageAtDesc(user);
+        log.info("Found {} conversations for user: {}", conversations.size(), user.getUsername());
 
         return conversations.stream()
                 .map(conv -> {
-                    // Xác định người chat (không phải current user)
-                    User otherUser = conv.getBuyer().getUserId().equals(userId)
-                            ? conv.getSeller()
-                            : conv.getBuyer();
+                    try {
+                        // Xác định người chat (không phải current user)
+                        User otherUser = conv.getBuyer().getUserId().equals(userId)
+                                ? conv.getSeller()
+                                : conv.getBuyer();
 
-                    // Đếm tin nhắn chưa đọc
-                    Long unreadCount = messageRepository.countUnreadInConversation(conv, user);
+                        // Đếm tin nhắn chưa đọc using separate query
+                        Long unreadCount = messageRepository.countUnreadInConversation(conv, user);
 
-                    // Lấy tin nhắn cuối cùng
-                    String lastMessage = null;
-                    if (!conv.getMessages().isEmpty()) {
-                        lastMessage = conv.getMessages().get(conv.getMessages().size() - 1).getContent();
+                        // Get last message using separate query - NEVER access conv.getMessages()
+                        String lastMessage = null;
+                        LocalDateTime lastMessageAt = conv.getLastMessageAt();
+
+                        List<Message> recentMessages = messageRepository.findTop1ByConversationOrderByCreatedAtDesc(conv);
+                        if (!recentMessages.isEmpty()) {
+                            Message lastMsg = recentMessages.get(0);
+                            lastMessage = lastMsg.getContent();
+                            lastMessageAt = lastMsg.getCreatedAt();
+                        }
+
+                        return SimpleChatRecipientResponse.builder()
+                                .userId(otherUser.getUserId())
+                                .username(otherUser.getUsername() != null ? otherUser.getUsername() : "")
+                                .firstName(otherUser.getFirstName() != null ? otherUser.getFirstName() : "")
+                                .lastName(otherUser.getLastName() != null ? otherUser.getLastName() : "")
+                                .profilePictureUrl(otherUser.getProfilePictureUrl())
+                                .conversationId(conv.getConversationId())
+                                .lastMessage(lastMessage != null ? lastMessage : "No messages yet")
+                                .lastMessageAt(lastMessageAt)
+                                .unreadCount(unreadCount != null ? unreadCount.intValue() : 0)
+                                .build();
+                    } catch (Exception e) {
+                        log.error("Error processing conversation {}: {}", conv.getConversationId(), e.getMessage());
+                        // Return minimal data if there's an error
+                        User otherUser = conv.getBuyer().getUserId().equals(userId)
+                                ? conv.getSeller()
+                                : conv.getBuyer();
+
+                        return SimpleChatRecipientResponse.builder()
+                                .userId(otherUser.getUserId())
+                                .username(otherUser.getUsername() != null ? otherUser.getUsername() : "")
+                                .firstName(otherUser.getFirstName() != null ? otherUser.getFirstName() : "")
+                                .lastName(otherUser.getLastName() != null ? otherUser.getLastName() : "")
+                                .conversationId(conv.getConversationId())
+                                .lastMessage("Error loading message")
+                                .lastMessageAt(conv.getLastMessageAt())
+                                .unreadCount(0)
+                                .build();
                     }
-
-                    return SimpleChatRecipientResponse.builder()
-                            .userId(otherUser.getUserId())
-                            .username(otherUser.getUsername())
-                            .firstName(otherUser.getFirstName())
-                            .lastName(otherUser.getLastName())
-                            .profilePictureUrl(otherUser.getProfilePictureUrl())
-                            .conversationId(conv.getConversationId())
-                            .lastMessage(lastMessage)
-                            .lastMessageAt(conv.getLastMessageAt())
-                            .unreadCount(unreadCount.intValue())
-                            .build();
                 })
                 .collect(Collectors.toList());
     }
@@ -69,7 +140,10 @@ public class SimpleChatService {
     /**
      * Lấy lịch sử tin nhắn với một người
      */
+    @Transactional(readOnly = true)
     public List<SimpleMessageResponse> getMessageHistory(Long userId, Long recipientId) {
+        log.info("Getting message history between userId: {} and recipientId: {}", userId, recipientId);
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
         User recipient = userRepository.findById(recipientId)
@@ -79,11 +153,14 @@ public class SimpleChatService {
         List<Conversation> conversations = conversationRepository.findConversationsBetweenUsers(user, recipient);
 
         if (conversations.isEmpty()) {
+            log.info("No conversation found between users");
             return List.of(); // Chưa có conversation
         }
 
         Conversation conversation = conversations.get(0);
         List<Message> messages = messageRepository.findByConversationOrderByCreatedAtAsc(conversation);
+
+        log.info("Found {} messages in conversation", messages.size());
 
         return messages.stream()
                 .map(SimpleMessageResponse::fromEntity)
@@ -95,6 +172,8 @@ public class SimpleChatService {
      */
     @Transactional
     public SimpleMessageResponse sendMessage(Long senderId, Long recipientId, String content) {
+        log.info("Sending message from userId: {} to recipientId: {}", senderId, recipientId);
+
         User sender = userRepository.findById(senderId)
                 .orElseThrow(() -> new RuntimeException("Sender not found"));
         User recipient = userRepository.findById(recipientId)
@@ -113,6 +192,7 @@ public class SimpleChatService {
                 .build();
 
         message = messageRepository.save(message);
+        log.info("Message saved with ID: {}", message.getMessageId());
 
         // Cập nhật last message time
         conversation.setLastMessageAt(LocalDateTime.now());
@@ -126,6 +206,8 @@ public class SimpleChatService {
      */
     @Transactional
     public void markMessagesAsRead(Long conversationId, Long userId) {
+        log.info("Marking messages as read for conversationId: {} by userId: {}", conversationId, userId);
+
         Conversation conversation = conversationRepository.findById(conversationId)
                 .orElseThrow(() -> new RuntimeException("Conversation not found"));
         User user = userRepository.findById(userId)
@@ -139,6 +221,8 @@ public class SimpleChatService {
      */
     @Transactional
     public void clearUserHistory(Long userId) {
+        log.info("Clearing chat history for userId: {}", userId);
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new RuntimeException("User not found"));
 
@@ -159,20 +243,29 @@ public class SimpleChatService {
      * Tìm hoặc tạo conversation giữa 2 users
      */
     private Conversation getOrCreateConversation(User user1, User user2) {
+        log.info("Getting or creating conversation between {} and {}", user1.getUsername(), user2.getUsername());
+
         List<Conversation> conversations = conversationRepository.findConversationsBetweenUsers(user1, user2);
 
         if (!conversations.isEmpty()) {
+            log.info("Found existing conversation with ID: {}", conversations.get(0).getConversationId());
             return conversations.get(0);
         }
 
-        // Tạo mới
+        // Tạo mới - quy ước: user có ID nhỏ hơn làm buyer, user có ID lớn hơn làm seller
+        User buyer = user1.getUserId() < user2.getUserId() ? user1 : user2;
+        User seller = user1.getUserId() < user2.getUserId() ? user2 : user1;
+
         Conversation conversation = Conversation.builder()
-                .buyer(user1)
-                .seller(user2)
+                .buyer(buyer)
+                .seller(seller)
                 .createdAt(LocalDateTime.now())
                 .lastMessageAt(LocalDateTime.now())
                 .build();
 
-        return conversationRepository.save(conversation);
+        conversation = conversationRepository.save(conversation);
+        log.info("Created new conversation with ID: {}", conversation.getConversationId());
+
+        return conversation;
     }
 }

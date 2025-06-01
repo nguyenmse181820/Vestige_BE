@@ -20,6 +20,9 @@ public interface MessageRepository extends JpaRepository<Message, Long> {
     // Lấy tin nhắn trong cuộc trò chuyện (không phân trang)
     List<Message> findByConversationOrderByCreatedAtAsc(Conversation conversation);
 
+    // NEW: Lấy tin nhắn cuối cùng trong conversation
+    List<Message> findTop1ByConversationOrderByCreatedAtDesc(Conversation conversation);
+
     // Đánh dấu tất cả tin nhắn trong cuộc trò chuyện là đã đọc
     @Modifying
     @Query("UPDATE Message m SET m.isRead = true WHERE m.conversation = :conversation AND m.sender != :user AND m.isRead = false")

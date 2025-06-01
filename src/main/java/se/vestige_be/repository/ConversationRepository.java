@@ -15,8 +15,12 @@ public interface ConversationRepository extends JpaRepository<Conversation, Long
     // Tìm cuộc trò chuyện giữa buyer và seller về một sản phẩm
     Optional<Conversation> findByProductAndBuyerAndSeller(Product product, User buyer, User seller);
 
-    // Tìm tất cả cuộc trò chuyện của một user (có thể là buyer hoặc seller)
-    @Query("SELECT c FROM Conversation c WHERE c.buyer = :user OR c.seller = :user ORDER BY c.lastMessageAt DESC")
+    // UPDATED: Tìm tất cả cuộc trò chuyện của một user với JOIN FETCH để tránh LazyInitializationException
+    @Query("SELECT DISTINCT c FROM Conversation c " +
+            "LEFT JOIN FETCH c.buyer " +
+            "LEFT JOIN FETCH c.seller " +
+            "WHERE c.buyer = :user OR c.seller = :user " +
+            "ORDER BY c.lastMessageAt DESC NULLS LAST")
     List<Conversation> findByUserOrderByLastMessageAtDesc(@Param("user") User user);
 
     // Tìm cuộc trò chuyện giữa 2 người dùng

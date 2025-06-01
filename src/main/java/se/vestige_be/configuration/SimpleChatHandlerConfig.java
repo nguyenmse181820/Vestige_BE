@@ -1,3 +1,4 @@
+// src/main/java/se/vestige_be/configuration/SimpleChatHandlerConfig.java
 package se.vestige_be.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
@@ -6,6 +7,7 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
 import se.vestige_be.service.SimpleChatService;
+import se.vestige_be.service.UserService;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
@@ -16,6 +18,7 @@ import java.util.concurrent.ConcurrentHashMap;
 public class SimpleChatHandlerConfig implements WebSocketHandler {
 
     private final SimpleChatService chatService;
+    private final UserService userService;  // ADD: Inject UserService
     private final ObjectMapper objectMapper = new ObjectMapper();
 
     // Lưu sessions theo userId
@@ -59,11 +62,17 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
                 case "GET_RECIPIENTS":
                     handleGetRecipients(session, userId);
                     break;
+                case "GET_ALL_USERS":
+                    handleGetAllUsers(session, userId);
+                    break;
                 case "GET_HISTORY":
                     handleGetHistory(session, userId, payload);
                     break;
                 case "SEND_MESSAGE":
                     handleSendMessage(userId, payload);
+                    break;
+                case "START_CONVERSATION":
+                    handleStartConversation(session, userId, payload);
                     break;
                 case "JOIN_CONVERSATION":
                     handleJoinConversation(session, userId, payload);
@@ -72,7 +81,7 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
                     sendError(session, "Unknown action: " + action);
             }
         } catch (Exception e) {
-            log.error("Error handling message from user {}: {}", userId, e.getMessage());
+            log.error("Error handling message from user {}: {}", userId, e.getMessage(), e);
             sendError(session, "Error processing message: " + e.getMessage());
         }
     }
@@ -99,27 +108,98 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
     // Handle actions
     private void handleGetRecipients(WebSocketSession session, String userId) {
         try {
+            log.info("=== Getting recipients for user: {} ===", userId);
             var recipients = chatService.getChatRecipients(Long.parseLong(userId));
+            log.info("=== Found {} recipients ===", recipients.size());
+
             sendToSession(session, Map.of(
                     "action", "RECIPIENTS_RESPONSE",
                     "recipients", recipients
             ));
+            log.info("=== Successfully sent recipients response ===");
         } catch (Exception e) {
+            log.error("=== ERROR getting recipients for user {}: {} ===", userId, e.getMessage(), e);
             sendError(session, "Error getting recipients: " + e.getMessage());
+        }
+    }
+
+    private void handleGetAllUsers(WebSocketSession session, String userId) {
+        try {
+            log.info("Getting all users except user: {}", userId);
+
+            // IMPORTANT: Use UserService to get all users, then filter
+            var allUsers = userService.findAllUsers();
+            log.info("Total users in database: {}", allUsers.size());
+
+            var filteredUsers = allUsers.stream()
+                    .filter(user -> !user.getUserId().equals(Long.parseLong(userId)))
+                    .map(user -> Map.of(
+                            "userId", user.getUserId(),
+                            "username", user.getUsername(),
+                            "firstName", user.getFirstName() != null ? user.getFirstName() : "",
+                            "lastName", user.getLastName() != null ? user.getLastName() : "",
+                            "profilePictureUrl", user.getProfilePictureUrl() != null ? user.getProfilePictureUrl() : ""
+                    ))
+                    .toList();
+
+            log.info("Filtered users count: {}", filteredUsers.size());
+
+            sendToSession(session, Map.of(
+                    "action", "ALL_USERS_RESPONSE",
+                    "users", filteredUsers
+            ));
+        } catch (Exception e) {
+            log.error("Error getting all users for user {}: {}", userId, e.getMessage(), e);
+            sendError(session, "Error getting users: " + e.getMessage());
+        }
+    }
+
+    private void handleStartConversation(WebSocketSession session, String userId, Map<String, Object> payload) {
+        try {
+            Long recipientId = Long.parseLong(payload.get("recipientId").toString());
+            log.info("Starting conversation between user {} and recipient {}", userId, recipientId);
+
+            var conversation = chatService.getOrCreateConversation(Long.parseLong(userId), recipientId);
+            log.info("Conversation created/found with ID: {}", conversation.getConversationId());
+
+            sendToSession(session, Map.of(
+                    "action", "CONVERSATION_STARTED",
+                    "conversationId", conversation.getConversationId(),
+                    "recipientId", recipientId
+            ));
+        } catch (Exception e) {
+            log.error("Error starting conversation for user {}: {}", userId, e.getMessage(), e);
+            sendError(session, "Error starting conversation: " + e.getMessage());
         }
     }
 
     private void handleGetHistory(WebSocketSession session, String userId, Map<String, Object> payload) {
         try {
             Long recipientId = Long.parseLong(payload.get("recipientId").toString());
-            var history = chatService.getMessageHistory(Long.parseLong(userId), recipientId);
+            log.info("=== Getting history between user {} and recipient {} ===", userId, recipientId);
 
-            sendToSession(session, Map.of(
+            var history = chatService.getMessageHistory(Long.parseLong(userId), recipientId);
+            log.info("=== Found {} messages in history ===", history.size());
+
+            // Log each message for debugging
+            for (int i = 0; i < history.size(); i++) {
+                var msg = history.get(i);
+                log.info("=== Message {}: ID={}, content='{}', sender={} ===",
+                        i+1, msg.getMessageId(), msg.getContent(), msg.getSenderId());
+            }
+
+            var response = Map.of(
                     "action", "HISTORY_RESPONSE",
                     "recipientId", recipientId,
                     "messages", history
-            ));
+            );
+
+            log.info("=== Sending history response with {} messages ===", history.size());
+            sendToSession(session, response);
+            log.info("=== History response sent successfully ===");
+
         } catch (Exception e) {
+            log.error("=== ERROR getting history for user {}: {} ===", userId, e.getMessage(), e);
             sendError(session, "Error getting history: " + e.getMessage());
         }
     }
@@ -129,6 +209,8 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
             Long senderIdLong = Long.parseLong(senderId);
             Long recipientId = Long.parseLong(payload.get("recipientId").toString());
             String content = payload.get("content").toString();
+
+            log.info("Sending message from {} to {}: {}", senderId, recipientId, content);
 
             // Lưu message vào DB và lấy response
             var messageResponse = chatService.sendMessage(senderIdLong, recipientId, content);
@@ -152,13 +234,15 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
             }
 
         } catch (Exception e) {
-            log.error("Error sending message: {}", e.getMessage());
+            log.error("Error sending message from user {}: {}", senderId, e.getMessage(), e);
         }
     }
 
     private void handleJoinConversation(WebSocketSession session, String userId, Map<String, Object> payload) {
         try {
             Long conversationId = Long.parseLong(payload.get("conversationId").toString());
+            log.info("User {} joining conversation {}", userId, conversationId);
+
             chatService.markMessagesAsRead(conversationId, Long.parseLong(userId));
 
             sendToSession(session, Map.of(
@@ -166,6 +250,7 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
                     "conversationId", conversationId
             ));
         } catch (Exception e) {
+            log.error("Error joining conversation for user {}: {}", userId, e.getMessage(), e);
             sendError(session, "Error joining conversation: " + e.getMessage());
         }
     }
@@ -189,10 +274,14 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
         try {
             if (session.isOpen()) {
                 String json = objectMapper.writeValueAsString(data);
+                log.info("=== SENDING TO WEBSOCKET: {} ===", json);
                 session.sendMessage(new TextMessage(json));
+                log.info("=== WEBSOCKET MESSAGE SENT SUCCESSFULLY ===");
+            } else {
+                log.error("=== WEBSOCKET SESSION IS CLOSED ===");
             }
         } catch (Exception e) {
-            log.error("Error sending message to session: {}", e.getMessage());
+            log.error("=== ERROR SENDING TO WEBSOCKET: {} ===", e.getMessage(), e);
         }
     }
 
