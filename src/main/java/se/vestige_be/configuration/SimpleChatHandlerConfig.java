@@ -1,8 +1,6 @@
-// src/main/java/se/vestige_be/configuration/SimpleChatHandlerConfig.java
 package se.vestige_be.configuration;
 
 import com.fasterxml.jackson.databind.ObjectMapper;
-import lombok.AllArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Component;
 import org.springframework.web.socket.*;
@@ -11,18 +9,26 @@ import se.vestige_be.service.UserService;
 
 import java.util.Map;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.CompletableFuture;
 
 @Component
 @Slf4j
-@AllArgsConstructor
 public class SimpleChatHandlerConfig implements WebSocketHandler {
 
     private final SimpleChatService chatService;
-    private final UserService userService;  // ADD: Inject UserService
-    private final ObjectMapper objectMapper = new ObjectMapper();
+    private final UserService userService;
+    private final ObjectMapper objectMapper; // Inject ObjectMapper được cấu hình
 
     // Lưu sessions theo userId
     private final Map<String, WebSocketSession> userSessions = new ConcurrentHashMap<>();
+
+    public SimpleChatHandlerConfig(SimpleChatService chatService,
+                                   UserService userService,
+                                   ObjectMapper objectMapper) {
+        this.chatService = chatService;
+        this.userService = userService;
+        this.objectMapper = objectMapper; // Sử dụng ObjectMapper đã được cấu hình
+    }
 
     @Override
     public void afterConnectionEstablished(WebSocketSession session) throws Exception {
@@ -34,7 +40,7 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
             userSessions.put(userId, session);
             log.info("User {} connected with session {}", userId, session.getId());
 
-            // Gửi confirmation
+            // Gửi confirmation ngay lập tức
             sendToSession(session, Map.of(
                     "action", "CONNECTION_ESTABLISHED",
                     "userId", userId,
@@ -58,30 +64,39 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
 
             log.info("Received action: {} from user: {}", action, userId);
 
-            switch (action) {
-                case "GET_RECIPIENTS":
-                    handleGetRecipients(session, userId);
-                    break;
-                case "GET_ALL_USERS":
-                    handleGetAllUsers(session, userId);
-                    break;
-                case "GET_HISTORY":
-                    handleGetHistory(session, userId, payload);
-                    break;
-                case "SEND_MESSAGE":
-                    handleSendMessage(userId, payload);
-                    break;
-                case "START_CONVERSATION":
-                    handleStartConversation(session, userId, payload);
-                    break;
-                case "JOIN_CONVERSATION":
-                    handleJoinConversation(session, userId, payload);
-                    break;
-                default:
-                    sendError(session, "Unknown action: " + action);
-            }
+            // Xử lý bất đồng bộ để không block WebSocket thread
+            CompletableFuture.runAsync(() -> {
+                try {
+                    switch (action) {
+                        case "GET_RECIPIENTS":
+                            handleGetRecipients(session, userId);
+                            break;
+                        case "GET_ALL_USERS":
+                            handleGetAllUsers(session, userId);
+                            break;
+                        case "GET_HISTORY":
+                            handleGetHistory(session, userId, payload);
+                            break;
+                        case "SEND_MESSAGE":
+                            handleSendMessage(userId, payload);
+                            break;
+                        case "START_CONVERSATION":
+                            handleStartConversation(session, userId, payload);
+                            break;
+                        case "JOIN_CONVERSATION":
+                            handleJoinConversation(session, userId, payload);
+                            break;
+                        default:
+                            sendError(session, "Unknown action: " + action);
+                    }
+                } catch (Exception e) {
+                    log.error("Error handling action {} from user {}: {}", action, userId, e.getMessage(), e);
+                    sendError(session, "Error processing message: " + e.getMessage());
+                }
+            });
+
         } catch (Exception e) {
-            log.error("Error handling message from user {}: {}", userId, e.getMessage(), e);
+            log.error("Error parsing message from user {}: {}", userId, e.getMessage(), e);
             sendError(session, "Error processing message: " + e.getMessage());
         }
     }
@@ -108,17 +123,16 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
     // Handle actions
     private void handleGetRecipients(WebSocketSession session, String userId) {
         try {
-            log.info("=== Getting recipients for user: {} ===", userId);
+            log.info("Getting recipients for user: {}", userId);
             var recipients = chatService.getChatRecipients(Long.parseLong(userId));
-            log.info("=== Found {} recipients ===", recipients.size());
+            log.info("Found {} recipients", recipients.size());
 
             sendToSession(session, Map.of(
                     "action", "RECIPIENTS_RESPONSE",
                     "recipients", recipients
             ));
-            log.info("=== Successfully sent recipients response ===");
         } catch (Exception e) {
-            log.error("=== ERROR getting recipients for user {}: {} ===", userId, e.getMessage(), e);
+            log.error("ERROR getting recipients for user {}: {}", userId, e.getMessage(), e);
             sendError(session, "Error getting recipients: " + e.getMessage());
         }
     }
@@ -127,10 +141,7 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
         try {
             log.info("Getting all users except user: {}", userId);
 
-            // IMPORTANT: Use UserService to get all users, then filter
             var allUsers = userService.findAllUsers();
-            log.info("Total users in database: {}", allUsers.size());
-
             var filteredUsers = allUsers.stream()
                     .filter(user -> !user.getUserId().equals(Long.parseLong(userId)))
                     .map(user -> Map.of(
@@ -141,8 +152,6 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
                             "profilePictureUrl", user.getProfilePictureUrl() != null ? user.getProfilePictureUrl() : ""
                     ))
                     .toList();
-
-            log.info("Filtered users count: {}", filteredUsers.size());
 
             sendToSession(session, Map.of(
                     "action", "ALL_USERS_RESPONSE",
@@ -160,7 +169,6 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
             log.info("Starting conversation between user {} and recipient {}", userId, recipientId);
 
             var conversation = chatService.getOrCreateConversation(Long.parseLong(userId), recipientId);
-            log.info("Conversation created/found with ID: {}", conversation.getConversationId());
 
             sendToSession(session, Map.of(
                     "action", "CONVERSATION_STARTED",
@@ -176,30 +184,19 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
     private void handleGetHistory(WebSocketSession session, String userId, Map<String, Object> payload) {
         try {
             Long recipientId = Long.parseLong(payload.get("recipientId").toString());
-            log.info("=== Getting history between user {} and recipient {} ===", userId, recipientId);
+            log.info("Getting history between user {} and recipient {}", userId, recipientId);
 
             var history = chatService.getMessageHistory(Long.parseLong(userId), recipientId);
-            log.info("=== Found {} messages in history ===", history.size());
+            log.info("Found {} messages in history", history.size());
 
-            // Log each message for debugging
-            for (int i = 0; i < history.size(); i++) {
-                var msg = history.get(i);
-                log.info("=== Message {}: ID={}, content='{}', sender={} ===",
-                        i+1, msg.getMessageId(), msg.getContent(), msg.getSenderId());
-            }
-
-            var response = Map.of(
+            sendToSession(session, Map.of(
                     "action", "HISTORY_RESPONSE",
                     "recipientId", recipientId,
                     "messages", history
-            );
-
-            log.info("=== Sending history response with {} messages ===", history.size());
-            sendToSession(session, response);
-            log.info("=== History response sent successfully ===");
+            ));
 
         } catch (Exception e) {
-            log.error("=== ERROR getting history for user {}: {} ===", userId, e.getMessage(), e);
+            log.error("ERROR getting history for user {}: {}", userId, e.getMessage(), e);
             sendError(session, "Error getting history: " + e.getMessage());
         }
     }
@@ -212,8 +209,10 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
 
             log.info("Sending message from {} to {}: {}", senderId, recipientId, content);
 
-            // Lưu message vào DB và lấy response
+            // Lưu message vào DB
             var messageResponse = chatService.sendMessage(senderIdLong, recipientId, content);
+
+            // QUAN TRỌNG: Gửi message cho cả người gửi và người nhận NGAY LẬP TỨC
 
             // Gửi cho người nhận
             WebSocketSession recipientSession = userSessions.get(recipientId.toString());
@@ -222,19 +221,28 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
                         "action", "NEW_MESSAGE",
                         "message", messageResponse
                 ));
+                log.info("Message sent to recipient {}", recipientId);
+            } else {
+                log.info("Recipient {} is not online", recipientId);
             }
 
-            // Confirm cho người gửi
+            // Confirm cho người gửi NGAY LẬP TỨC
             WebSocketSession senderSession = userSessions.get(senderId);
             if (senderSession != null && senderSession.isOpen()) {
                 sendToSession(senderSession, Map.of(
                         "action", "MESSAGE_SENT",
                         "message", messageResponse
                 ));
+                log.info("Message confirmation sent to sender {}", senderId);
             }
 
         } catch (Exception e) {
             log.error("Error sending message from user {}: {}", senderId, e.getMessage(), e);
+            // Thông báo lỗi cho người gửi
+            WebSocketSession senderSession = userSessions.get(senderId);
+            if (senderSession != null && senderSession.isOpen()) {
+                sendError(senderSession, "Failed to send message: " + e.getMessage());
+            }
         }
     }
 
@@ -257,7 +265,6 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
 
     // Utility methods
     private String getUserIdFromSession(WebSocketSession session) {
-        // Lấy từ query parameter userId
         String query = session.getUri().getQuery();
         if (query != null && query.contains("userId=")) {
             String[] params = query.split("&");
@@ -274,14 +281,13 @@ public class SimpleChatHandlerConfig implements WebSocketHandler {
         try {
             if (session.isOpen()) {
                 String json = objectMapper.writeValueAsString(data);
-                log.info("=== SENDING TO WEBSOCKET: {} ===", json);
                 session.sendMessage(new TextMessage(json));
-                log.info("=== WEBSOCKET MESSAGE SENT SUCCESSFULLY ===");
+                log.debug("Message sent successfully to session: {}", session.getId());
             } else {
-                log.error("=== WEBSOCKET SESSION IS CLOSED ===");
+                log.warn("Cannot send message: WebSocket session is closed");
             }
         } catch (Exception e) {
-            log.error("=== ERROR SENDING TO WEBSOCKET: {} ===", e.getMessage(), e);
+            log.error("Error sending message to WebSocket: {}", e.getMessage(), e);
         }
     }
 

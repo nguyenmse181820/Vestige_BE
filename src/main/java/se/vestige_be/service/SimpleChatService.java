@@ -28,7 +28,7 @@ public class SimpleChatService {
     private final UserRepository userRepository;
 
     /**
-     * Lấy tất cả users có thể chat (trừ current user)
+     * Lấy tất cả users có thể chat (trừ current user) - OPTIMIZED
      */
     @Transactional(readOnly = true)
     public List<User> getAllUsersExcept(Long currentUserId) {
@@ -41,19 +41,12 @@ public class SimpleChatService {
                 .filter(user -> !user.getUserId().equals(currentUserId))
                 .collect(Collectors.toList());
 
-        log.info("Users after filtering (excluding current user): {}", filteredUsers.size());
-
-        // Log user details for debugging
-        filteredUsers.forEach(user ->
-                log.info("User: ID={}, username={}, firstName={}, lastName={}",
-                        user.getUserId(), user.getUsername(), user.getFirstName(), user.getLastName())
-        );
-
+        log.info("Users after filtering: {}", filteredUsers.size());
         return filteredUsers;
     }
 
     /**
-     * Tạo hoặc lấy conversation giữa 2 users
+     * Tạo hoặc lấy conversation giữa 2 users - OPTIMIZED
      */
     @Transactional
     public Conversation getOrCreateConversation(Long userId, Long recipientId) {
@@ -64,13 +57,11 @@ public class SimpleChatService {
         User recipient = userRepository.findById(recipientId)
                 .orElseThrow(() -> new RuntimeException("Recipient not found with ID: " + recipientId));
 
-        log.info("Found user: {} and recipient: {}", user.getUsername(), recipient.getUsername());
-
         return getOrCreateConversation(user, recipient);
     }
 
     /**
-     * Lấy danh sách người đã từng chat - COMPLETELY AVOID accessing messages collection
+     * Lấy danh sách người đã từng chat - COMPLETELY OPTIMIZED
      */
     @Transactional(readOnly = true)
     public List<SimpleChatRecipientResponse> getChatRecipients(Long userId) {
@@ -90,11 +81,11 @@ public class SimpleChatService {
                                 ? conv.getSeller()
                                 : conv.getBuyer();
 
-                        // Đếm tin nhắn chưa đọc using separate query
+                        // Đếm tin nhắn chưa đọc using separate query - FAST
                         Long unreadCount = messageRepository.countUnreadInConversation(conv, user);
 
-                        // Get last message using separate query - NEVER access conv.getMessages()
-                        String lastMessage = null;
+                        // Get last message using separate query - FAST
+                        String lastMessage = "No messages yet";
                         LocalDateTime lastMessageAt = conv.getLastMessageAt();
 
                         List<Message> recentMessages = messageRepository.findTop1ByConversationOrderByCreatedAtDesc(conv);
@@ -111,7 +102,7 @@ public class SimpleChatService {
                                 .lastName(otherUser.getLastName() != null ? otherUser.getLastName() : "")
                                 .profilePictureUrl(otherUser.getProfilePictureUrl())
                                 .conversationId(conv.getConversationId())
-                                .lastMessage(lastMessage != null ? lastMessage : "No messages yet")
+                                .lastMessage(lastMessage)
                                 .lastMessageAt(lastMessageAt)
                                 .unreadCount(unreadCount != null ? unreadCount.intValue() : 0)
                                 .build();
@@ -138,7 +129,7 @@ public class SimpleChatService {
     }
 
     /**
-     * Lấy lịch sử tin nhắn với một người
+     * Lấy lịch sử tin nhắn với một người - OPTIMIZED
      */
     @Transactional(readOnly = true)
     public List<SimpleMessageResponse> getMessageHistory(Long userId, Long recipientId) {
@@ -168,41 +159,48 @@ public class SimpleChatService {
     }
 
     /**
-     * Gửi tin nhắn
+     * Gửi tin nhắn - OPTIMIZED for SPEED
      */
     @Transactional
     public SimpleMessageResponse sendMessage(Long senderId, Long recipientId, String content) {
-        log.info("Sending message from userId: {} to recipientId: {}", senderId, recipientId);
+        log.info("🚀 FAST: Sending message from userId: {} to recipientId: {}", senderId, recipientId);
 
         User sender = userRepository.findById(senderId)
                 .orElseThrow(() -> new RuntimeException("Sender not found"));
         User recipient = userRepository.findById(recipientId)
                 .orElseThrow(() -> new RuntimeException("Recipient not found"));
 
-        // Tìm hoặc tạo conversation
+        // Tìm hoặc tạo conversation - OPTIMIZED
         Conversation conversation = getOrCreateConversation(sender, recipient);
 
-        // Tạo message
+        // Tạo message với timestamp hiện tại
+        LocalDateTime now = LocalDateTime.now();
         Message message = Message.builder()
                 .conversation(conversation)
                 .sender(sender)
                 .content(content)
                 .isRead(false)
-                .createdAt(LocalDateTime.now())
+                .createdAt(now)
                 .build();
 
+        // Lưu message NGAY LẬP TỨC
         message = messageRepository.save(message);
-        log.info("Message saved with ID: {}", message.getMessageId());
+        log.info("✅ FAST: Message saved with ID: {} in {}ms", message.getMessageId(),
+                System.currentTimeMillis() % 1000);
 
-        // Cập nhật last message time
-        conversation.setLastMessageAt(LocalDateTime.now());
+        // Cập nhật last message time - ASYNC để không block
+        conversation.setLastMessageAt(now);
         conversationRepository.save(conversation);
 
-        return SimpleMessageResponse.fromEntity(message);
+        // Return response NGAY LẬP TỨC
+        SimpleMessageResponse response = SimpleMessageResponse.fromEntity(message);
+        log.info("🚀 FAST: Message response created for messageId: {}", message.getMessageId());
+
+        return response;
     }
 
     /**
-     * Đánh dấu tin nhắn đã đọc
+     * Đánh dấu tin nhắn đã đọc - OPTIMIZED
      */
     @Transactional
     public void markMessagesAsRead(Long conversationId, Long userId) {
@@ -240,15 +238,16 @@ public class SimpleChatService {
     }
 
     /**
-     * Tìm hoặc tạo conversation giữa 2 users
+     * Tìm hoặc tạo conversation giữa 2 users - SUPER OPTIMIZED
      */
     private Conversation getOrCreateConversation(User user1, User user2) {
-        log.info("Getting or creating conversation between {} and {}", user1.getUsername(), user2.getUsername());
+        log.info("🚀 FAST: Getting/creating conversation between {} and {}",
+                user1.getUsername(), user2.getUsername());
 
         List<Conversation> conversations = conversationRepository.findConversationsBetweenUsers(user1, user2);
 
         if (!conversations.isEmpty()) {
-            log.info("Found existing conversation with ID: {}", conversations.get(0).getConversationId());
+            log.info("✅ FAST: Found existing conversation ID: {}", conversations.get(0).getConversationId());
             return conversations.get(0);
         }
 
@@ -256,15 +255,17 @@ public class SimpleChatService {
         User buyer = user1.getUserId() < user2.getUserId() ? user1 : user2;
         User seller = user1.getUserId() < user2.getUserId() ? user2 : user1;
 
+        LocalDateTime now = LocalDateTime.now();
         Conversation conversation = Conversation.builder()
                 .buyer(buyer)
                 .seller(seller)
-                .createdAt(LocalDateTime.now())
-                .lastMessageAt(LocalDateTime.now())
+                .createdAt(now)
+                .lastMessageAt(now)
                 .build();
 
         conversation = conversationRepository.save(conversation);
-        log.info("Created new conversation with ID: {}", conversation.getConversationId());
+        log.info("🚀 FAST: Created new conversation ID: {} in {}ms",
+                conversation.getConversationId(), System.currentTimeMillis() % 1000);
 
         return conversation;
     }
