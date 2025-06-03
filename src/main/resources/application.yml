@@ -18,11 +18,41 @@ spring:
         format_sql: true
     show-sql: false
 
+  # Jackson Configuration
+  jackson:
+    serialization:
+      write-dates-as-timestamps: false
+      indent-output: true
+    deserialization:
+      fail-on-unknown-properties: false
+    time-zone: Asia/Ho_Chi_Minh
+    date-format: yyyy-MM-dd HH:mm:ss
+
+  # CORS Configuration
+  web:
+    cors:
+      allowed-origins:
+        - "http://localhost:3000"
+        - "http://127.0.0.1:3000"
+      allowed-methods: "*"
+      allowed-headers: "*"
+      allow-credentials: true
+      max-age: 3600
+
+# Management endpoints
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info
+      cors:
+        allowed-origins: "http://localhost:3000"
+        allowed-methods: "GET,POST"
+
 jwt:
   secret: ${JWT_SECRET}
   expiration: ${JWT_EXPIRATION:3600000}
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}
-
 server:
   port: ${PORT:8080}
 
@@ -47,3 +77,10 @@ springdoc:
   show-actuator: false
   default-consumes-media-type: application/json
   default-produces-media-type: application/json
+
+# Logging Configuration
+logging:
+  level:
+    se.vestige_be: INFO
+    org.springframework.web.socket: DEBUG
+    com.fasterxml.jackson: INFO
