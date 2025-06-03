@@ -40,7 +40,7 @@ public class CategoryController {
     }
 
     @PatchMapping("/{id}")
-    public ResponseEntity<?> updateCategory(@Valid @PathVariable Integer id, @RequestBody CategoryRequest request) {
+    public ResponseEntity<?> updateCategory(@Valid @PathVariable Long id, @RequestBody CategoryRequest request) {
         return ResponseEntity.ok(
                 ObjectResponse.builder()
                         .data(categoryService.updateCategory(
@@ -53,7 +53,7 @@ public class CategoryController {
     }
 
     @DeleteMapping("/{id}")
-    public ResponseEntity<?> deleteCategory(@PathVariable Integer id) {
+    public ResponseEntity<?> deleteCategory(@PathVariable Long id) {
         categoryService.deleteCategory(id);
         return ResponseEntity.ok(
                 ObjectResponse.builder()

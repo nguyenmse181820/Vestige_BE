@@ -15,7 +15,7 @@ import java.util.stream.Collectors;
 @NoArgsConstructor
 @AllArgsConstructor
 public class CategoryResponse {
-    private Integer categoryId;
+    private Long categoryId;
     private String name;
     private String description;
     private LocalDateTime createdAt;
@@ -33,7 +33,7 @@ public class CategoryResponse {
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CategoryParentResponse {
-        private Integer categoryId;
+        private Long categoryId;
         private String name;
 
         public static CategoryParentResponse fromEntity(Category category) {
