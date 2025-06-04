@@ -24,8 +24,6 @@ public class DataInitializer implements CommandLineRunner {
     private final ProductRepository productRepository;
     private final UserAddressRepository userAddressRepository;
     private final OrderRepository orderRepository;
-    // OrderItemRepository is often not needed if CascadeType.ALL is used on Order.orderItems
-    // private final OrderItemRepository orderItemRepository;
 
 
     public DataInitializer(RoleRepository roleRepository,
@@ -178,13 +176,11 @@ public class DataInitializer implements CommandLineRunner {
                         .title("Vintage Gucci Handbag").description("Authentic vintage Gucci handbag, excellent condition.")
                         .price(new BigDecimal("450.00")).originalPrice(new BigDecimal("600.00"))
                         .condition(ProductCondition.USED_EXCELLENT).status(ProductStatus.ACTIVE)
-                        .shippingFee(new BigDecimal("15.00"))
                         .images(List.of(ProductImage.builder().imageUrl("gucci_bag_1.jpg").isPrimary(true).displayOrder(1).build()))
                         .build());
                 products.add(Product.builder().seller(janeSmith).category(womensFashion).brand(nike)
                         .title("Limited Edition Nike Sneakers (Women's)").description("Rare Nike Air Max, size 7, like new.")
                         .price(new BigDecimal("220.00")).condition(ProductCondition.LIKE_NEW).status(ProductStatus.ACTIVE)
-                        .shippingFee(new BigDecimal("10.00"))
                         .images(List.of(ProductImage.builder().imageUrl("nike_women_sneakers_1.jpg").isPrimary(true).displayOrder(1).build()))
                         .build());
 
@@ -192,13 +188,11 @@ public class DataInitializer implements CommandLineRunner {
                 products.add(Product.builder().seller(mikeWilson).category(electronics).brand(apple)
                         .title("Used iPhone 12 Pro").description("Good condition iPhone 12 Pro, 256GB, unlocked.")
                         .price(new BigDecimal("550.00")).condition(ProductCondition.USED_GOOD).status(ProductStatus.ACTIVE)
-                        .shippingFee(new BigDecimal("8.00"))
                         .images(List.of(ProductImage.builder().imageUrl("iphone12pro_1.jpg").isPrimary(true).displayOrder(1).build()))
                         .build());
                 products.add(Product.builder().seller(mikeWilson).category(mensFashion).brand(nike)
                         .title("Classic Nike Hoodie (Men's)").description("Comfortable Nike hoodie, size L, barely worn.")
                         .price(new BigDecimal("45.00")).condition(ProductCondition.LIKE_NEW).status(ProductStatus.ACTIVE)
-                        .shippingFee(new BigDecimal("5.00"))
                         .images(List.of(ProductImage.builder().imageUrl("nike_men_hoodie_1.jpg").isPrimary(true).displayOrder(1).build()))
                         .build());
 
@@ -243,7 +237,6 @@ public class DataInitializer implements CommandLineRunner {
                 Order order1 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .status(OrderStatus.PENDING).createdAt(LocalDateTime.now().minusDays(5))
-                        .totalAmount(gucciBag.getPrice().add(gucciBag.getShippingFee())) // Simplified total
                         .build();
                 OrderItem item1_1 = OrderItem.builder().order(order1).product(gucciBag).seller(gucciBag.getSeller())
                         .price(gucciBag.getPrice()).platformFee(gucciBag.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
@@ -258,7 +251,6 @@ public class DataInitializer implements CommandLineRunner {
                 Order order2 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .status(OrderStatus.PAID).paidAt(LocalDateTime.now().minusDays(4)).createdAt(LocalDateTime.now().minusDays(4))
-                        .totalAmount(iphone.getPrice().add(iphone.getShippingFee()))
                         .build();
                 OrderItem item2_1 = OrderItem.builder().order(order2).product(iphone).seller(iphone.getSeller())
                         .price(iphone.getPrice()).platformFee(iphone.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
@@ -276,7 +268,6 @@ public class DataInitializer implements CommandLineRunner {
                         .brand(brandRepository.findByName("Nike").orElseThrow())
                         .title("Jane's Nike Hoodie").description("Comfortable Nike hoodie, size M.")
                         .price(new BigDecimal("50.00")).condition(ProductCondition.USED_GOOD).status(ProductStatus.ACTIVE)
-                        .shippingFee(new BigDecimal("7.00"))
                         .images(List.of(ProductImage.builder().imageUrl("jane_hoodie_1.jpg").isPrimary(true).displayOrder(1).build()))
                         .build();
                 nikeHoodieJane.getImages().forEach(img -> img.setProduct(nikeHoodieJane));
@@ -287,7 +278,6 @@ public class DataInitializer implements CommandLineRunner {
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .status(OrderStatus.SHIPPED).paidAt(LocalDateTime.now().minusDays(3)).shippedAt(LocalDateTime.now().minusDays(2))
                         .createdAt(LocalDateTime.now().minusDays(3))
-                        .totalAmount(nikeHoodieJane.getPrice().add(nikeHoodieJane.getShippingFee()))
                         .build();
                 OrderItem item3_1 = OrderItem.builder().order(order3).product(nikeHoodieJane).seller(nikeHoodieJane.getSeller())
                         .price(nikeHoodieJane.getPrice()).platformFee(nikeHoodieJane.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
@@ -305,7 +295,6 @@ public class DataInitializer implements CommandLineRunner {
                         .brand(brandRepository.findByName("Samsung").orElseThrow())
                         .title("Samsung Galaxy Buds").description("Wireless earbuds, great sound.")
                         .price(new BigDecimal("120.00")).condition(ProductCondition.LIKE_NEW).status(ProductStatus.ACTIVE)
-                        .shippingFee(new BigDecimal("5.00"))
                         .images(List.of(ProductImage.builder().imageUrl("galaxy_buds_1.jpg").isPrimary(true).displayOrder(1).build()))
                         .build();
                 anotherElectronic.getImages().forEach(img -> img.setProduct(anotherElectronic));
@@ -318,7 +307,6 @@ public class DataInitializer implements CommandLineRunner {
                         .shippedAt(LocalDateTime.now().minusDays(8))
                         .deliveredAt(LocalDateTime.now().minusDays(5))
                         .createdAt(LocalDateTime.now().minusDays(10))
-                        .totalAmount(anotherElectronic.getPrice().add(anotherElectronic.getShippingFee()))
                         .build();
                 OrderItem item4_1 = OrderItem.builder().order(order4).product(anotherElectronic).seller(anotherElectronic.getSeller())
                         .price(anotherElectronic.getPrice()).platformFee(anotherElectronic.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
@@ -333,7 +321,6 @@ public class DataInitializer implements CommandLineRunner {
                 Order order5 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .status(OrderStatus.CANCELLED).createdAt(LocalDateTime.now().minusDays(1))
-                        .totalAmount(nikeSneakers.getPrice().add(nikeSneakers.getShippingFee()))
                         .build();
                 OrderItem item5_1 = OrderItem.builder().order(order5).product(nikeSneakers).seller(nikeSneakers.getSeller())
                         .price(nikeSneakers.getPrice()).platformFee(nikeSneakers.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))

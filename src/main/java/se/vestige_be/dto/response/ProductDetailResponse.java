@@ -23,7 +23,6 @@ public class ProductDetailResponse {
     private String size;
     private String color;
     private BigDecimal authenticityConfidenceScore;
-    private BigDecimal shippingFee;
     private String status;
     private Integer viewsCount;
     private Integer likesCount;

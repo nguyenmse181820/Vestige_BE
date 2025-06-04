@@ -21,16 +21,10 @@ public class ProductListResponse {
     private String condition;
     private String size;
     private String color;
-    private BigDecimal shippingFee;
     private String status;
     private Integer viewsCount;
     private Integer likesCount;
     private LocalDateTime createdAt;
-
-    private Long sellerId;
-    private String sellerUsername;
-    private Boolean sellerIsLegitProfile;
-    private BigDecimal sellerRating;
 
     private Long categoryId;
     private String categoryName;

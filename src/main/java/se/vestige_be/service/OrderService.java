@@ -60,7 +60,6 @@ public class OrderService {
             OrderItemData itemData = validateAndProcessItem(itemRequest, buyerId);
             orderItemsData.add(itemData);
             totalAmount = totalAmount.add(itemData.getItemPrice());
-            totalShippingFee = totalShippingFee.add(itemData.getShippingFee());
         }
 
         totalAmount = totalAmount.add(totalShippingFee);
@@ -134,7 +133,7 @@ public class OrderService {
         order.setStatus(OrderStatus.PAID);
         order.setPaidAt(LocalDateTime.now());
 
-        // Update all order items to processing
+        // Update all order items to process
         order.getOrderItems().forEach(item -> {
             if (item.getStatus() == OrderItemStatus.PENDING) {
                 item.setStatus(OrderItemStatus.PROCESSING);
@@ -532,7 +531,6 @@ public class OrderService {
         // Calculate fees
         BigDecimal platformFee = feeTierService.calculatePlatformFee(itemPrice, product.getSeller());
         BigDecimal feePercentage = feeTierService.calculateFeePercentage(itemPrice, product.getSeller());
-        BigDecimal shippingFee = product.getShippingFee() != null ? product.getShippingFee() : BigDecimal.ZERO;
 
         return OrderItemData.builder()
                 .product(product)
@@ -540,7 +538,6 @@ public class OrderService {
                 .itemPrice(itemPrice)
                 .platformFee(platformFee)
                 .feePercentage(feePercentage)
-                .shippingFee(shippingFee)
                 .notes(itemRequest.getNotes())
                 .build();
     }
@@ -652,10 +649,6 @@ public class OrderService {
                 .map(this::convertToItemSummary)
                 .collect(Collectors.toList());
 
-        BigDecimal totalShippingFee = order.getOrderItems().stream()
-                .map(item -> item.getProduct().getShippingFee() != null ? item.getProduct().getShippingFee() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
         Set<Long> uniqueSellerIds = order.getOrderItems().stream()
                 .map(item -> item.getSeller().getUserId())
                 .collect(Collectors.toSet());
@@ -674,7 +667,6 @@ public class OrderService {
                 .orderId(order.getOrderId())
                 .status(order.getStatus().name())
                 .totalAmount(order.getTotalAmount())
-                .totalShippingFee(totalShippingFee)
                 .totalItems(order.getOrderItems().size())
                 .uniqueSellers(uniqueSellerIds.size())
                 .createdAt(order.getCreatedAt())
@@ -718,11 +710,6 @@ public class OrderService {
         Map<String, List<OrderDetailResponse.OrderItemDetail>> itemsBySeller = orderItemDetails.stream()
                 .collect(Collectors.groupingBy(item -> item.getSeller().getUsername()));
 
-        // Calculate totals
-        BigDecimal totalShippingFee = order.getOrderItems().stream()
-                .map(item -> item.getProduct().getShippingFee() != null ? item.getProduct().getShippingFee() : BigDecimal.ZERO)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
         BigDecimal totalPlatformFee = order.getOrderItems().stream()
                 .map(OrderItem::getPlatformFee)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -749,7 +736,6 @@ public class OrderService {
                 .orderId(order.getOrderId())
                 .status(order.getStatus().name())
                 .totalAmount(order.getTotalAmount())
-                .totalShippingFee(totalShippingFee)
                 .totalPlatformFee(totalPlatformFee)
                 .totalItems(order.getOrderItems().size())
                 .uniqueSellers(uniqueSellerIds.size())
@@ -781,7 +767,6 @@ public class OrderService {
                 .size(product.getSize())
                 .color(product.getColor())
                 .primaryImageUrl(primaryImageUrl)
-                .shippingFee(product.getShippingFee())
                 .categoryId(product.getCategory().getCategoryId())
                 .categoryName(product.getCategory().getName())
                 .brandId(product.getBrand().getBrandId())
@@ -897,7 +882,6 @@ public class OrderService {
         private BigDecimal itemPrice;
         private BigDecimal platformFee;
         private BigDecimal feePercentage;
-        private BigDecimal shippingFee;
         private String notes;
     }
 }

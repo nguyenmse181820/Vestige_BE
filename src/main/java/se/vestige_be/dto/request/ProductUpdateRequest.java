@@ -38,10 +38,6 @@ public class ProductUpdateRequest {
     @Size(max = 50, message = "Color cannot exceed 50 characters")
     private String color;
 
-    @DecimalMin(value = "0.00", message = "Shipping fee cannot be negative")
-    @DecimalMax(value = "999999.99", message = "Shipping fee cannot exceed 999,999.99")
-    private BigDecimal shippingFee;
-
     private ProductStatus status;
     private Long categoryId;
     private Long brandId;
@@ -54,7 +50,6 @@ public class ProductUpdateRequest {
     public boolean hasCondition() { return condition != null; }
     public boolean hasSize() { return size != null; }
     public boolean hasColor() { return color != null; }
-    public boolean hasShippingFee() { return shippingFee != null; }
     public boolean hasStatus() { return status != null; }
     public boolean hasCategoryId() { return categoryId != null; }
     public boolean hasBrandId() { return brandId != null; }

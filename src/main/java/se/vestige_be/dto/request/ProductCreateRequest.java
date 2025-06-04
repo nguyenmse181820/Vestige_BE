@@ -42,10 +42,6 @@ public class ProductCreateRequest {
     @Size(max = 50, message = "Color cannot exceed 50 characters")
     private String color;
 
-    @DecimalMin(value = "0.00", message = "Shipping fee cannot be negative")
-    @DecimalMax(value = "999999.99", message = "Shipping fee cannot exceed 999,999.99")
-    private BigDecimal shippingFee;
-
     private ProductStatus status;
 
     @NotNull(message = "Category ID is required")

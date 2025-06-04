@@ -82,7 +82,6 @@ public class ProductService {
                 .condition(request.getCondition())
                 .size(request.getSize())
                 .color(request.getColor())
-                .shippingFee(request.getShippingFee() != null ? request.getShippingFee() : BigDecimal.ZERO)
                 .status(request.getStatus() != null ? request.getStatus() : ProductStatus.DRAFT)
                 .viewsCount(0)
                 .likesCount(0)
@@ -176,10 +175,6 @@ public class ProductService {
 
         if (request.hasColor()) {
             product.setColor(request.getColor());
-        }
-
-        if (request.hasShippingFee()) {
-            product.setShippingFee(request.getShippingFee());
         }
 
         if (request.hasStatus()) {
@@ -399,15 +394,10 @@ public class ProductService {
                 .condition(product.getCondition().name())
                 .size(product.getSize())
                 .color(product.getColor())
-                .shippingFee(product.getShippingFee())
                 .status(product.getStatus().name())
                 .viewsCount(product.getViewsCount())
                 .likesCount(product.getLikesCount())
                 .createdAt(product.getCreatedAt())
-                .sellerId(product.getSeller().getUserId())
-                .sellerUsername(product.getSeller().getUsername())
-                .sellerIsLegitProfile(product.getSeller().getIsLegitProfile())
-                .sellerRating(product.getSeller().getSellerRating())
                 .categoryId(product.getCategory().getCategoryId())
                 .categoryName(product.getCategory().getName())
                 .brandId(product.getBrand().getBrandId())
@@ -450,7 +440,6 @@ public class ProductService {
                 .size(product.getSize())
                 .color(product.getColor())
                 .authenticityConfidenceScore(product.getAuthenticityConfidenceScore())
-                .shippingFee(product.getShippingFee())
                 .status(product.getStatus().name())
                 .viewsCount(product.getViewsCount())
                 .likesCount(product.getLikesCount())

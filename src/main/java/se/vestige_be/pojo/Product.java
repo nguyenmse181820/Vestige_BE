@@ -64,9 +64,6 @@ public class Product {
     @Builder.Default
     private BigDecimal authenticityConfidenceScore = BigDecimal.ZERO;
 
-    @Column(precision = 10, scale = 2)
-    private BigDecimal shippingFee;
-
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
