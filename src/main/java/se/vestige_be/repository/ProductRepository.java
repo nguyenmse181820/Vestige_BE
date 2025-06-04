@@ -7,6 +7,8 @@ import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import se.vestige_be.pojo.Product;
 import se.vestige_be.pojo.enums.ProductStatus;
 
+import java.util.Optional;
+
 public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpecificationExecutor<Product> {
     Page<Product> findByStatus(ProductStatus status, Pageable pageable);
 
@@ -19,4 +21,6 @@ public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpeci
     boolean existsBySellerUserIdAndTitle(Long sellerId, String title);
 
     Page<Product> findByStatusOrderByCreatedAtDesc(ProductStatus status, Pageable pageable);
+
+    Optional<Product> findBySellerUserIdAndTitle(Long sellerId, String title);
 }

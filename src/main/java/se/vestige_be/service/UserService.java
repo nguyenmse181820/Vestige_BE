@@ -24,6 +24,7 @@ import se.vestige_be.repository.UserRepository;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.List;
 
 @Service
 @AllArgsConstructor
@@ -33,6 +34,10 @@ public class UserService {
     private final RoleRepository roleRepository;
     private final ProductRepository productRepository;
     private final PasswordEncoder passwordEncoder;
+
+    public List<User> findAllUsers() {
+        return userRepository.findAll();
+    }
 
     public User findByUsername(String username) {
         return userRepository.findByUsername(username)
