@@ -86,7 +86,7 @@ public class UserAddressController {
         }
     }
 
-    @PutMapping("/{addressId}")
+    @PatchMapping("/{addressId}")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<ApiResponse<UserAddressResponse>> updateAddress(
             @PathVariable Long addressId,
