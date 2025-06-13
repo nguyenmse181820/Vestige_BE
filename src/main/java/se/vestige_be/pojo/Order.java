@@ -4,6 +4,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import se.vestige_be.pojo.enums.OrderStatus;
+import se.vestige_be.pojo.enums.PaymentMethod;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -34,6 +35,10 @@ public class Order {
     @JoinColumn(name = "shipping_address_id")
     @ToString.Exclude
     private UserAddress shippingAddress;
+
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 20)
+    private PaymentMethod paymentMethod;
 
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)

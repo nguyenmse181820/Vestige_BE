@@ -7,6 +7,7 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.messaging.handler.annotation.support.MethodArgumentTypeMismatchException;
 import org.springframework.security.authentication.BadCredentialsException;
+import org.springframework.security.authorization.AuthorizationDeniedException;
 import org.springframework.web.bind.MethodArgumentNotValidException;
 import org.springframework.web.bind.annotation.ExceptionHandler;
 import org.springframework.web.bind.annotation.RestControllerAdvice;
@@ -22,7 +23,6 @@ import java.util.Map;
 @Slf4j
 public class GlobalExceptionHandler {
 
-    // ✅ Add custom exception handlers BEFORE RuntimeException
     @ExceptionHandler(ResourceNotFoundException.class)
     public ResponseEntity<ObjectResponse> handleResourceNotFound(ResourceNotFoundException ex) {
         log.warn("Resource not found: {}", ex.getMessage());
@@ -49,11 +49,10 @@ public class GlobalExceptionHandler {
 
     @ExceptionHandler(UnauthorizedException.class)
     public ResponseEntity<ObjectResponse> handleUnauthorized(UnauthorizedException ex) {
-        log.warn("Unauthorized access: {}", ex.getMessage());
 
-        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                 .body(ObjectResponse.builder()
-                        .status(HttpStatus.FORBIDDEN.toString())
+                        .status(HttpStatus.UNAUTHORIZED.toString())
                         .message(ex.getMessage())
                         .data(null)
                         .build());
@@ -65,12 +64,12 @@ public class GlobalExceptionHandler {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", Instant.now());
-        body.put("status", HttpStatus.FORBIDDEN.value());
+        body.put("status", HttpStatus.UNAUTHORIZED.value());
         body.put("error", "Forbidden");
         body.put("message", ex.getMessage());
         body.put("path", request.getDescription(false).substring(4));
 
-        return new ResponseEntity<>(body, HttpStatus.FORBIDDEN);
+        return new ResponseEntity<>(body, HttpStatus.UNAUTHORIZED);
     }
 
     @ExceptionHandler(TokenPossibleCompromiseException.class)
@@ -79,12 +78,12 @@ public class GlobalExceptionHandler {
 
         Map<String, Object> body = new LinkedHashMap<>();
         body.put("timestamp", Instant.now());
-        body.put("status", HttpStatus.FORBIDDEN.value());
+        body.put("status", HttpStatus.UNAUTHORIZED.value());
         body.put("error", "Security Alert");
         body.put("message", "Session invalidated due to security concerns");
         body.put("path", request.getDescription(false).substring(4));
 
-        return new ResponseEntity<>(body, HttpStatus.FORBIDDEN);
+        return new ResponseEntity<>(body, HttpStatus.UNAUTHORIZED);
     }
 
     @ExceptionHandler(BadCredentialsException.class)
@@ -159,6 +158,17 @@ public class GlobalExceptionHandler {
                         .build());
     }
 
+    @ExceptionHandler(AuthorizationDeniedException.class)
+    public ResponseEntity<ObjectResponse> handleAuthorizationDenied(AuthorizationDeniedException ex) {
+
+        return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                .body(ObjectResponse.builder()
+                        .status(HttpStatus.FORBIDDEN.toString())
+                        .message("Access Denied: You do not have the required permissions to perform this action.")
+                        .data(null)
+                        .build());
+    }
+
     @ExceptionHandler(IllegalArgumentException.class)
     public ResponseEntity<ObjectResponse> handleIllegalArgument(IllegalArgumentException ex) {
         log.warn("Illegal argument: {}", ex.getMessage());
@@ -171,7 +181,6 @@ public class GlobalExceptionHandler {
                         .build());
     }
 
-    // ✅ Improved RuntimeException handler - more specific handling
     @ExceptionHandler(RuntimeException.class)
     public ResponseEntity<ObjectResponse> handleRuntimeException(RuntimeException ex) {
         log.error("Runtime exception: {}", ex.getMessage(), ex);
@@ -189,15 +198,14 @@ public class GlobalExceptionHandler {
         }
 
         if (message.contains("unauthorized") || message.contains("permission") || message.contains("access denied")) {
-            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+            return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
                     .body(ObjectResponse.builder()
-                            .status(HttpStatus.FORBIDDEN.toString())
+                            .status(HttpStatus.UNAUTHORIZED.toString())
                             .message(ex.getMessage())
                             .data(null)
                             .build());
         }
 
-        // Default to bad request for other runtime exceptions
         return ResponseEntity.status(HttpStatus.BAD_REQUEST)
                 .body(ObjectResponse.builder()
                         .status(HttpStatus.BAD_REQUEST.toString())

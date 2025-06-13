@@ -130,7 +130,7 @@ public class UserAddressController {
         }
     }
 
-    @PostMapping("/{addressId}/set-default")
+    @PatchMapping("/{addressId}/set-default")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<ApiResponse<UserAddressResponse>> setDefaultAddress(
             @PathVariable Long addressId,

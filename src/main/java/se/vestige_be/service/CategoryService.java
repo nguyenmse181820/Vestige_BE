@@ -18,7 +18,7 @@ public class CategoryService {
     private final CategoryRepository categoryRepository;
 
     public List<CategoryResponse> findAll() {
-        List<Category> categories = categoryRepository.findAll();
+        List<Category> categories = categoryRepository.findByParentCategoryIsNull();
         return CategoryResponse.fromEntityList(categories);
     }
 

@@ -5,7 +5,7 @@ spring:
     scheduling:
       enabled: true
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/vestige}
+    url: ${DATABASE_URL}
     username: ${DATABASE_USERNAME:postgres}
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
@@ -14,7 +14,6 @@ spring:
       ddl-auto: update
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgresSQLDialect
         format_sql: true
     show-sql: false
 
@@ -33,7 +32,11 @@ spring:
     cors:
       allowed-origins:
         - "http://localhost:3000"
+        - "http://localhost:5173"
+        - "http://localhost:4000"
         - "http://127.0.0.1:3000"
+        - "http://127.0.0.1:5173"
+        - "http://127.0.0.1:4000"
       allowed-methods: "*"
       allowed-headers: "*"
       allow-credentials: true
@@ -46,13 +49,14 @@ management:
       exposure:
         include: health,info
       cors:
-        allowed-origins: "http://localhost:3000"
+        allowed-origins: "http://localhost:3000,http://localhost:5173,http://localhost:4000"
         allowed-methods: "GET,POST"
 
 jwt:
   secret: ${JWT_SECRET}
   expiration: ${JWT_EXPIRATION:3600000}
   refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}
+
 server:
   port: ${PORT:8080}
 
@@ -72,7 +76,6 @@ springdoc:
     tags-sorter: alpha
     operations-sorter: method
     display-request-duration: true
-  packages-to-scan: se.vestige_be.controller
   paths-to-match: /api/**
   show-actuator: false
   default-consumes-media-type: application/json
@@ -81,6 +84,89 @@ springdoc:
 # Logging Configuration
 logging:
   level:
-    se.vestige_be: INFO
     org.springframework.web.socket: DEBUG
     com.fasterxml.jackson: INFO
+
+---
+# Local Development Profile
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:postgresql://localhost:5432/vestige
+    username: postgres
+    password: ${DATABASE_PASSWORD:12345}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: true
+  web:
+    cors:
+      allowed-origins:
+        - "http://localhost:3000"
+        - "http://localhost:5173"
+        - "http://localhost:4000"
+        - "http://127.0.0.1:3000"
+        - "http://127.0.0.1:5173"
+
+logging:
+  level:
+    com.boeing.bookingservice: DEBUG
+    org.springframework.web: DEBUG
+
+---
+# Docker Profile
+spring:
+  config:
+    activate:
+      on-profile: docker
+  datasource:
+    url: jdbc:postgresql://postgres:5432/vestige
+    username: ${DATABASE_USERNAME:postgres}
+    password: ${DATABASE_PASSWORD:vestigedb}
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  web:
+    cors:
+      allowed-origins:
+        - "http://localhost:3000"
+        - "http://localhost:5173"
+        - "http://localhost:4000"
+        - "http://127.0.0.1:3000"
+        - "http://127.0.0.1:5173"
+        - "http://host.docker.internal:3000"
+        - "http://host.docker.internal:5173"
+
+logging:
+  level:
+    com.boeing.bookingservice: INFO
+
+---
+# AWS Profile (for AWS RDS)
+spring:
+  config:
+    activate:
+      on-profile: aws
+  datasource:
+    url: jdbc:postgresql://vestige.c1koqow427at.ap-southeast-1.rds.amazonaws.com:5432/postgres
+    username: postgres
+    password: vestigedb
+  jpa:
+    hibernate:
+      ddl-auto: update
+    show-sql: false
+  web:
+    cors:
+      allowed-origins:
+        - "http://localhost:3000"
+        - "http://localhost:5173"
+        - "http://localhost:4000"
+        - "http://127.0.0.1:3000"
+        - "http://127.0.0.1:5173"
+
+logging:
+  level:
+    com.boeing.bookingservice: INFO

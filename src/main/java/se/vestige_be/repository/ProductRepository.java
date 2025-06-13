@@ -1,5 +1,6 @@
 package se.vestige_be.repository;
 
+import jakarta.validation.constraints.Size;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
@@ -23,4 +24,6 @@ public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpeci
     Page<Product> findByStatusOrderByCreatedAtDesc(ProductStatus status, Pageable pageable);
 
     Optional<Product> findBySellerUserIdAndTitle(Long sellerId, String title);
+
+    boolean existsBySellerUserIdAndTitleAndProductIdNot(Long sellerId, @Size(min = 5, max = 100, message = "Title must be between 5 and 100 characters") String title, Long productId);
 }

@@ -38,12 +38,20 @@ public class OrderService {
     private final FeeTierService feeTierService;
 
     @Transactional
-    public OrderDetailResponse createMultiProductOrder(OrderCreateRequest request, Long buyerId) {
-        // Validate buyer
+    public Object createOrder(OrderCreateRequest request, Long buyerId) {
+        if (request.getPaymentMethod() == PaymentMethod.COD) {
+            return createCodOrder(request, buyerId);
+//        } else if (request.getPaymentMethod() == PaymentMethod.ONLINE) {
+//            return prepareOnlinePayment(request, buyerId);
+        } else {
+            throw new BusinessLogicException("Unsupported payment method.");
+        }
+    }
+
+    private OrderDetailResponse createCodOrder(OrderCreateRequest request, Long buyerId) {
         User buyer = userRepository.findById(buyerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Buyer not found"));
 
-        // Validate shipping address
         UserAddress shippingAddress = userAddressRepository.findById(request.getShippingAddressId())
                 .orElseThrow(() -> new ResourceNotFoundException("Shipping address not found"));
 
@@ -51,31 +59,23 @@ public class OrderService {
             throw new UnauthorizedException("Shipping address does not belong to buyer");
         }
 
-        // Validate and process each item
         List<OrderItemData> orderItemsData = new ArrayList<>();
         BigDecimal totalAmount = BigDecimal.ZERO;
-        BigDecimal totalShippingFee = BigDecimal.ZERO;
-
         for (OrderCreateRequest.OrderItemRequest itemRequest : request.getItems()) {
             OrderItemData itemData = validateAndProcessItem(itemRequest, buyerId);
             orderItemsData.add(itemData);
             totalAmount = totalAmount.add(itemData.getItemPrice());
         }
 
-        totalAmount = totalAmount.add(totalShippingFee);
-
-        // Create Order
         Order order = Order.builder()
                 .buyer(buyer)
                 .totalAmount(totalAmount)
                 .shippingAddress(shippingAddress)
-                .status(OrderStatus.PENDING)
+                .status(OrderStatus.PROCESSING)
+                .paymentMethod(PaymentMethod.COD)
                 .build();
-
         order = orderRepository.save(order);
-        log.info("Created order: {} with total amount: {} VND", order.getOrderId(), totalAmount);
 
-        // Create OrderItems and Transactions
         for (OrderItemData itemData : orderItemsData) {
             OrderItem orderItem = OrderItem.builder()
                     .order(order)
@@ -90,7 +90,6 @@ public class OrderService {
 
             order.getOrderItems().add(orderItem);
 
-            // Create Transaction for each item
             Transaction transaction = Transaction.builder()
                     .orderItem(orderItem)
                     .seller(itemData.getProduct().getSeller())
@@ -104,36 +103,104 @@ public class OrderService {
                     .escrowStatus(EscrowStatus.HOLDING)
                     .buyerProtectionEligible(true)
                     .build();
-
             transactionRepository.save(transaction);
 
-            // Mark product as sold
-            itemData.getProduct().setStatus(ProductStatus.SOLD);
-            itemData.getProduct().setSoldAt(LocalDateTime.now());
-            productRepository.save(itemData.getProduct());
+
+            Product product = itemData.getProduct();
+            product.setStatus(ProductStatus.SOLD);
+            product.setSoldAt(LocalDateTime.now());
+            productRepository.save(product);
         }
 
         order = orderRepository.save(order);
-        log.info("Order created successfully: {} with {} items", order.getOrderId(), order.getOrderItems().size());
+        return convertToDetailResponse(order);
+    }
+
+    @Transactional
+    public OrderDetailResponse createMultiProductOrder(OrderCreateRequest request, Long buyerId) {
+        User buyer = userRepository.findById(buyerId)
+                .orElseThrow(() -> new ResourceNotFoundException("Buyer not found"));
+
+        UserAddress shippingAddress = userAddressRepository.findById(request.getShippingAddressId())
+                .orElseThrow(() -> new ResourceNotFoundException("Shipping address not found"));
+
+        if (!shippingAddress.getUser().getUserId().equals(buyerId)) {
+            throw new UnauthorizedException("Shipping address does not belong to buyer");
+        }
+
+        List<OrderItemData> orderItemsData = new ArrayList<>();
+        BigDecimal totalAmount = BigDecimal.ZERO;
+        // BigDecimal totalShippingFee = BigDecimal.ZERO;
+
+        for (OrderCreateRequest.OrderItemRequest itemRequest : request.getItems()) {
+            OrderItemData itemData = validateAndProcessItem(itemRequest, buyerId);
+            orderItemsData.add(itemData);
+            totalAmount = totalAmount.add(itemData.getItemPrice());
+        }
+
+        // totalAmount = totalAmount.add(totalShippingFee);
+
+        Order order = Order.builder()
+                .buyer(buyer)
+                .totalAmount(totalAmount)
+                .shippingAddress(shippingAddress)
+                .status(OrderStatus.PENDING)
+                .build();
+
+        order = orderRepository.save(order);
+
+        for (OrderItemData itemData : orderItemsData) {
+            OrderItem orderItem = OrderItem.builder()
+                    .order(order)
+                    .product(itemData.getProduct())
+                    .seller(itemData.getProduct().getSeller())
+                    .price(itemData.getItemPrice())
+                    .platformFee(itemData.getPlatformFee())
+                    .feePercentage(itemData.getFeePercentage())
+                    .status(OrderItemStatus.PENDING)
+                    .escrowStatus(EscrowStatus.HOLDING)
+                    .build();
+
+            order.getOrderItems().add(orderItem);
+
+            Transaction transaction = Transaction.builder()
+                    .orderItem(orderItem)
+                    .seller(itemData.getProduct().getSeller())
+                    .buyer(buyer)
+                    .offer(itemData.getOffer())
+                    .amount(itemData.getItemPrice())
+                    .platformFee(itemData.getPlatformFee())
+                    .feePercentage(itemData.getFeePercentage())
+                    .shippingAddress(shippingAddress)
+                    .status(TransactionStatus.PENDING)
+                    .escrowStatus(EscrowStatus.HOLDING)
+                    .buyerProtectionEligible(true)
+                    .build();
+            transactionRepository.save(transaction);
+
+
+            Product product = itemData.getProduct();
+            product.setStatus(ProductStatus.SOLD);
+            product.setSoldAt(LocalDateTime.now());
+            productRepository.save(product);
+        }
+
+        order = orderRepository.save(order);
 
         return convertToDetailResponse(order);
     }
 
     @Transactional
     public OrderDetailResponse confirmPayment(Long orderId, Long buyerId) {
-        log.info("Confirming payment for order: orderId={}, buyerId={}", orderId, buyerId);
-
         Order order = getOrderWithValidation(orderId, buyerId, true);
 
         if (!OrderStatus.PENDING.equals(order.getStatus())) {
             throw new BusinessLogicException("Order is not in pending status");
         }
 
-        // Update order status
         order.setStatus(OrderStatus.PAID);
         order.setPaidAt(LocalDateTime.now());
 
-        // Update all order items to process
         order.getOrderItems().forEach(item -> {
             if (item.getStatus() == OrderItemStatus.PENDING) {
                 item.setStatus(OrderItemStatus.PROCESSING);
@@ -141,21 +208,17 @@ public class OrderService {
         });
 
         order = orderRepository.save(order);
-        log.info("Payment confirmed for order: {}", orderId);
 
         return convertToDetailResponse(order);
     }
 
     @Transactional
     public OrderDetailResponse updateOrderItemStatus(Long orderId, Long itemId, OrderStatusUpdateRequest request, Long userId) {
-        log.info("Updating order item status: orderId={}, itemId={}, newStatus={}, userId={}",
-                orderId, itemId, request.getStatus(), userId);
-
         Order order = getOrderWithValidation(orderId, userId, false);
         OrderItem orderItem = order.getOrderItems().stream()
                 .filter(item -> item.getOrderItemId().equals(itemId))
                 .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Order item not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Order item not found with ID: " + itemId + " in order: " + orderId));
 
         OrderItemStatus newStatus;
         try {
@@ -167,57 +230,70 @@ public class OrderService {
         boolean isBuyer = order.getBuyer().getUserId().equals(userId);
         boolean isSeller = orderItem.getSeller().getUserId().equals(userId);
 
-        // Validate status transition permissions
         validateItemStatusUpdate(orderItem.getStatus(), newStatus, isBuyer, isSeller);
 
-        // Update item status
-        orderItem.setStatus(newStatus);
+        Transaction transaction = null;
+        if (newStatus == OrderItemStatus.SHIPPED || newStatus == OrderItemStatus.DELIVERED || newStatus == OrderItemStatus.CANCELLED) {
+            transaction = transactionRepository.findByOrderItemOrderItemId(itemId)
+                    .orElseThrow(() -> new IllegalStateException(
+                            "Transaction record not found for order item ID: " + itemId +
+                                    ", which is required for status update to " + newStatus));
+        }
 
-        // Update transaction if exists
-        Optional<Transaction> transactionOpt = transactionRepository.findByOrderItemOrderItemId(itemId);
+        orderItem.setStatus(newStatus); // Set new status on the item
 
         switch (newStatus) {
             case SHIPPED:
-                if (transactionOpt.isPresent()) {
-                    Transaction trans = transactionOpt.get();
-                    trans.setShippedAt(LocalDateTime.now());
-                    trans.setTrackingNumber(request.getTrackingNumber());
-                    trans.setTrackingUrl(request.getTrackingUrl());
-                    trans.setStatus(TransactionStatus.SHIPPED);
-                    transactionRepository.save(trans);
+                // Edge Case 1: Missing Tracking Information for "SHIPPED" status
+                if (request.getTrackingNumber() == null || request.getTrackingNumber().isBlank()) {
+                    throw new BusinessLogicException("Tracking number is required when marking an item as SHIPPED.");
                 }
+                // transaction will not be null here due to the check above
+                transaction.setShippedAt(LocalDateTime.now());
+                transaction.setTrackingNumber(request.getTrackingNumber());
+                transaction.setTrackingUrl(request.getTrackingUrl()); // trackingUrl can be optional
+                transaction.setStatus(TransactionStatus.SHIPPED);
+                transactionRepository.save(transaction);
                 log.info("Order item {} shipped with tracking: {}", itemId, request.getTrackingNumber());
                 break;
 
             case DELIVERED:
                 orderItem.setEscrowStatus(EscrowStatus.RELEASED);
-                if (transactionOpt.isPresent()) {
-                    Transaction trans = transactionOpt.get();
-                    trans.setDeliveredAt(LocalDateTime.now());
-                    trans.setStatus(TransactionStatus.DELIVERED);
-                    transactionRepository.save(trans);
-                }
+                // transaction will not be null here
+                transaction.setDeliveredAt(LocalDateTime.now());
+                transaction.setStatus(TransactionStatus.DELIVERED);
+                transactionRepository.save(transaction);
                 log.info("Order item {} delivered, escrow released", itemId);
                 break;
 
             case CANCELLED:
                 orderItem.setEscrowStatus(EscrowStatus.REFUNDED);
-                orderItem.getProduct().setStatus(ProductStatus.ACTIVE);
-                orderItem.getProduct().setSoldAt(null);
-                productRepository.save(orderItem.getProduct());
 
-                if (transactionOpt.isPresent()) {
-                    Transaction trans = transactionOpt.get();
-                    trans.setStatus(TransactionStatus.CANCELLED);
-                    transactionRepository.save(trans);
+                // Edge Case 3: Product State Inconsistency on Cancellation
+                Product productToUpdate = productRepository.findById(orderItem.getProduct().getProductId())
+                        .orElseThrow(() -> new ResourceNotFoundException(
+                                "Product with ID " + orderItem.getProduct().getProductId() +
+                                        " associated with order item " + itemId + " not found during cancellation."));
+
+                if (productToUpdate.getStatus() == ProductStatus.SOLD) {
+                    productToUpdate.setStatus(ProductStatus.ACTIVE);
+                    productToUpdate.setSoldAt(null);
+                    productRepository.save(productToUpdate);
+                    log.info("Product {} status set to ACTIVE due to order item {} cancellation.", productToUpdate.getProductId(), itemId);
+                } else {
+                    log.warn("Product {} was not in SOLD status (was {}), not changing status to ACTIVE for order item {} cancellation.",
+                            productToUpdate.getProductId(), productToUpdate.getStatus(), itemId);
                 }
+
+                // transaction will not be null here
+                transaction.setStatus(TransactionStatus.CANCELLED);
+                transactionRepository.save(transaction);
                 log.info("Order item {} cancelled, escrow refunded", itemId);
                 break;
         }
 
-        // Update overall order status based on item statuses
         updateOverallOrderStatus(order);
-        order = orderRepository.save(order);
+        order = orderRepository.save(order); // Persist changes to order and its items
 
         return convertToDetailResponse(order);
     }
@@ -225,26 +301,22 @@ public class OrderService {
     @Transactional
     public OrderDetailResponse shipOrderItem(Long orderId, Long itemId, OrderStatusUpdateRequest request, Long sellerId) {
         log.info("Shipping order item: orderId={}, itemId={}, sellerId={}", orderId, itemId, sellerId);
-
         OrderStatusUpdateRequest shipRequest = OrderStatusUpdateRequest.builder()
                 .status("SHIPPED")
                 .notes(request.getNotes())
                 .trackingNumber(request.getTrackingNumber())
                 .trackingUrl(request.getTrackingUrl())
                 .build();
-
         return updateOrderItemStatus(orderId, itemId, shipRequest, sellerId);
     }
 
     @Transactional
     public OrderDetailResponse confirmItemDelivery(Long orderId, Long itemId, String notes, Long buyerId) {
         log.info("Confirming item delivery: orderId={}, itemId={}, buyerId={}", orderId, itemId, buyerId);
-
         OrderStatusUpdateRequest deliveryRequest = OrderStatusUpdateRequest.builder()
                 .status("DELIVERED")
                 .notes(notes)
                 .build();
-
         return updateOrderItemStatus(orderId, itemId, deliveryRequest, buyerId);
     }
 
@@ -252,81 +324,136 @@ public class OrderService {
     public OrderDetailResponse cancelOrderItem(Long orderId, Long itemId, String reason, Long userId) {
         log.info("Cancelling order item: orderId={}, itemId={}, userId={}, reason={}", orderId, itemId, userId, reason);
 
-        Order order = getOrderWithValidation(orderId, userId, false);
+        Order order = getOrderWithValidation(orderId, userId, false); // Ensures user has relation to order
         OrderItem orderItem = order.getOrderItems().stream()
                 .filter(item -> item.getOrderItemId().equals(itemId))
                 .findFirst()
-                .orElseThrow(() -> new ResourceNotFoundException("Order item not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Order item not found: " + itemId));
 
-        // Check if user can cancel this item
         boolean isBuyer = order.getBuyer().getUserId().equals(userId);
         boolean isSeller = orderItem.getSeller().getUserId().equals(userId);
 
-        if (!isBuyer && !isSeller) {
-            throw new UnauthorizedException("Not authorized to cancel this item");
-        }
-
-        // Check if item can be cancelled based on status
         if (!isItemCancellable(orderItem.getStatus())) {
             throw new BusinessLogicException(
                     "Cannot cancel item in '" + orderItem.getStatus() + "' status. " +
-                            "Only PENDING and PROCESSING items can be cancelled."
+                            "Only PENDING and PROCESSING items can be cancelled by users through this flow."
             );
         }
 
-        // Perform cancellation
-        cancelOrderItemInternal(orderItem, reason);
+        // Authorization check for who can cancel
+        if (!isBuyer && !isSeller) { // Should be covered by getOrderWithValidation and item specific checks
+            throw new UnauthorizedException("User not authorized to cancel this specific item.");
+        }
+        // Additional specific business rule: e.g., only buyer can cancel PENDING, seller can cancel PROCESSING etc.
+        // This is partially handled in validateItemStatusUpdate called by updateOrderItemStatus.
 
-        // Auto-update overall order status
-        updateOverallOrderStatus(order);
-        order = orderRepository.save(order);
+        OrderStatusUpdateRequest cancelRequest = OrderStatusUpdateRequest.builder()
+                .status(OrderItemStatus.CANCELLED.name())
+                .notes(reason)
+                .build();
 
-        return convertToDetailResponse(order);
+        // This will call the main updateOrderItemStatus method which now contains all the logic
+        return updateOrderItemStatus(orderId, itemId, cancelRequest, userId);
     }
+
+
+    // This internal method is used by cancelOrder. It needs similar protections.
+    private void cancelOrderItemInternal(OrderItem orderItem, String reason, User requestingUser) {
+        log.info("Internal cancellation for order item: {}, reason: {}, requested by: {}",
+                orderItem.getOrderItemId(), reason, requestingUser.getUsername());
+
+        // Check if item can be cancelled based on status (already done by caller `cancelOrder`)
+        // if (!isItemCancellable(orderItem.getStatus())) {
+        //     log.warn("Item {} cannot be cancelled internally, status is {}", orderItem.getOrderItemId(), orderItem.getStatus());
+        //     return; // Or throw, depending on how cancelOrder wants to handle this
+        // }
+
+        orderItem.setStatus(OrderItemStatus.CANCELLED);
+        orderItem.setEscrowStatus(EscrowStatus.REFUNDED);
+
+        // Edge Case 3: Product State Inconsistency
+        Product productToUpdate = productRepository.findById(orderItem.getProduct().getProductId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                        "Product with ID " + orderItem.getProduct().getProductId() +
+                                " associated with order item " + orderItem.getOrderItemId() + " not found during internal cancellation."));
+
+        if (productToUpdate.getStatus() == ProductStatus.SOLD) {
+            productToUpdate.setStatus(ProductStatus.ACTIVE);
+            productToUpdate.setSoldAt(null);
+            productRepository.save(productToUpdate);
+            log.info("Product {} status set to ACTIVE due to internal cancellation of order item {}.",
+                    productToUpdate.getProductId(), orderItem.getOrderItemId());
+        } else {
+            log.warn("Product {} was not in SOLD status (was {}), not changing status to ACTIVE for internal cancellation of order item {}.",
+                    productToUpdate.getProductId(), productToUpdate.getStatus(), orderItem.getOrderItemId());
+        }
+
+        // Edge Case 2: Transaction Record Discrepancy
+        Transaction transaction = transactionRepository.findByOrderItemOrderItemId(orderItem.getOrderItemId())
+                .orElseThrow(() -> new IllegalStateException(
+                        "Transaction record not found for order item ID: " + orderItem.getOrderItemId() +
+                                ", which is required for internal cancellation."));
+        transaction.setStatus(TransactionStatus.CANCELLED);
+        transactionRepository.save(transaction);
+        log.info("Transaction {} for order item {} marked as CANCELLED.", transaction.getTransactionId(), orderItem.getOrderItemId());
+    }
+
 
     @Transactional
     public OrderDetailResponse cancelOrder(Long orderId, String reason, Long userId) {
         log.info("Cancelling order: orderId={}, userId={}, reason={}", orderId, userId, reason);
 
         Order order = getOrderWithValidation(orderId, userId, false);
+        User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        boolean hasShippedItems = order.getOrderItems().stream()
+
+        boolean hasShippedOrDeliveredItems = order.getOrderItems().stream()
                 .anyMatch(item -> item.getStatus() == OrderItemStatus.SHIPPED ||
                         item.getStatus() == OrderItemStatus.DELIVERED);
 
-        if (hasShippedItems) {
+        if (hasShippedOrDeliveredItems) {
             throw new BusinessLogicException(
-                    "Cannot cancel order with shipped items. " +
-                            "Please cancel individual items or contact support for assistance."
+                    "Cannot cancel order with shipped or delivered items. " +
+                            "Please manage individual items or contact support."
             );
         }
 
-        // Cancel all cancellable items
         List<OrderItem> cancelledItems = new ArrayList<>();
         List<OrderItem> unCancellableItems = new ArrayList<>();
 
         for (OrderItem item : order.getOrderItems()) {
             if (isItemCancellable(item.getStatus())) {
-                cancelOrderItemInternal(item, reason);
+                // Directly call the internal logic for cancellation side effects here
+                // instead of updateOrderItemStatus to avoid N order saves in a loop
+                cancelOrderItemInternal(item, reason, user);
                 cancelledItems.add(item);
             } else {
                 unCancellableItems.add(item);
             }
         }
 
-        if (cancelledItems.isEmpty()) {
-            throw new BusinessLogicException("No items can be cancelled in this order");
+        if (cancelledItems.isEmpty() && !unCancellableItems.isEmpty()) {
+            // This means all items were in a non-cancellable state (e.g. already cancelled, shipped etc.)
+            // but the initial check for shipped/delivered items passed.
+            // For example, if all items were already cancelled individually.
+            throw new BusinessLogicException("No items in this order are eligible for cancellation at this time.");
+        }
+        if (cancelledItems.isEmpty()){
+            // Order has no items or items were already processed in a way they disappeared from these lists
+            log.warn("Order {} has no items to cancel or all items were in an unexpected state.", orderId);
+            // We might still want to update the overall order status if it's pending.
         }
 
-        // Auto-update overall order status
-        updateOverallOrderStatus(order);
-        order = orderRepository.save(order);
 
-        log.info("Order {} cancelled: {} items cancelled, {} items unchanged",
+        updateOverallOrderStatus(order); // Recalculate overall order status
+        order = orderRepository.save(order); // Save all changes
+
+        log.info("Order {} processed for cancellation: {} items cancelled, {} items were not cancellable in this operation",
                 orderId, cancelledItems.size(), unCancellableItems.size());
 
         return convertToDetailResponse(order);
     }
+
 
     @Transactional
     public OrderDetailResponse updateOrderStatus(Long orderId, OrderStatusUpdateRequest request, Long userId) {
@@ -343,17 +470,13 @@ public class OrderService {
 
         boolean isBuyer = order.getBuyer().getUserId().equals(userId);
 
-        // Only allow specific manual transitions
         switch (newStatus) {
             case PAID:
-                // Only buyer can confirm payment
                 if (!isBuyer || !OrderStatus.PENDING.equals(order.getStatus())) {
-                    throw new BusinessLogicException("Only pending orders can be marked as paid by buyer");
+                    throw new BusinessLogicException("Only pending orders can be marked as paid by the buyer.");
                 }
                 order.setStatus(OrderStatus.PAID);
                 order.setPaidAt(LocalDateTime.now());
-
-                // Update all pending items to processing
                 order.getOrderItems().forEach(item -> {
                     if (item.getStatus() == OrderItemStatus.PENDING) {
                         item.setStatus(OrderItemStatus.PROCESSING);
@@ -362,26 +485,23 @@ public class OrderService {
                 break;
 
             case CANCELLED:
-                // Both buyer and seller can cancel (with restrictions)
-                if (!isBuyer && !isSellerInOrder(order, userId)) {
-                    throw new BusinessLogicException("Not authorized to cancel this order");
+                User user = userRepository.findById(userId).orElseThrow(() -> new ResourceNotFoundException("User not found"));
+                if (!isBuyer && !isSellerInOrder(order, userId)) { // isSellerInOrder checks if current user is a seller of any item
+                    throw new UnauthorizedException("Not authorized to cancel this order.");
                 }
-
-                // Cancel all cancellable items
+                // This manual order cancellation should also only affect cancellable items
                 order.getOrderItems().forEach(item -> {
-                    if (item.getStatus() == OrderItemStatus.PENDING ||
-                            item.getStatus() == OrderItemStatus.PROCESSING) {
-                        cancelOrderItemInternal(item, request.getNotes());
+                    if (isItemCancellable(item.getStatus())) {
+                        cancelOrderItemInternal(item, request.getNotes() != null ? request.getNotes() : "Order cancelled by user.", user);
                     }
                 });
                 break;
 
             default:
                 throw new BusinessLogicException("Order status '" + newStatus +
-                        "' updates automatically based on item statuses. Use item-specific endpoints instead.");
+                        "' is typically updated automatically based on item statuses. Use item-specific endpoints or allowed direct order status changes.");
         }
 
-        // Auto-update overall status
         updateOverallOrderStatus(order);
         order = orderRepository.save(order);
 
@@ -390,42 +510,33 @@ public class OrderService {
 
     public PagedResponse<OrderListResponse> getUserOrders(Long userId, String status, String role, Pageable pageable) {
         log.debug("Getting user orders: userId={}, status={}, role={}", userId, status, role);
-
         Page<Order> orders;
 
-        if ("seller".equals(role)) {
-            // For sellers, get orders that contain their items
+        if ("seller".equalsIgnoreCase(role)) {
             Page<OrderItem> sellerItems;
-
-            if (status != null) {
+            if (status != null && !status.trim().isEmpty()) {
                 try {
                     OrderItemStatus itemStatus = OrderItemStatus.valueOf(status.toUpperCase());
-                    sellerItems = orderItemRepository.findBySellerUserIdAndStatusOrderByOrderCreatedAtDesc(
-                            userId, itemStatus, pageable);
+                    sellerItems = orderItemRepository.findBySellerUserIdAndStatusOrderByOrderCreatedAtDesc(userId, itemStatus, pageable);
                 } catch (IllegalArgumentException e) {
-                    // If status is not an OrderItemStatus, get all items
+                    log.warn("Invalid OrderItemStatus provided for seller: {}. Defaulting to all items.", status);
                     sellerItems = orderItemRepository.findBySellerUserIdOrderByOrderCreatedAtDesc(userId, pageable);
                 }
             } else {
                 sellerItems = orderItemRepository.findBySellerUserIdOrderByOrderCreatedAtDesc(userId, pageable);
             }
-
-            // Extract unique orders from order items
             List<Order> uniqueOrders = sellerItems.getContent().stream()
                     .map(OrderItem::getOrder)
                     .distinct()
                     .collect(Collectors.toList());
-
             orders = new PageImpl<>(uniqueOrders, pageable, sellerItems.getTotalElements());
-
-        } else {
-            // For buyers, use direct order queries
-            if (status != null) {
+        } else { // Default to buyer role
+            if (status != null && !status.trim().isEmpty()) {
                 try {
                     OrderStatus orderStatus = OrderStatus.valueOf(status.toUpperCase());
-                    orders = orderRepository.findByBuyerUserIdAndStatusOrderByCreatedAtDesc(
-                            userId, orderStatus, pageable);
+                    orders = orderRepository.findByBuyerUserIdAndStatusOrderByCreatedAtDesc(userId, orderStatus, pageable);
                 } catch (IllegalArgumentException e) {
+                    log.warn("Invalid OrderStatus provided for buyer: {}. Defaulting to all orders.", status);
                     orders = orderRepository.findByBuyerUserIdOrderByCreatedAtDesc(userId, pageable);
                 }
             } else {
@@ -437,60 +548,49 @@ public class OrderService {
         return PagedResponse.of(orderResponses);
     }
 
+
     public OrderDetailResponse getOrderById(Long orderId, Long userId) {
         log.debug("Getting order details: orderId={}, userId={}", orderId, userId);
-
         Order order = getOrderWithValidation(orderId, userId, false);
         return convertToDetailResponse(order);
     }
 
     public OrderSellersResponse getOrderSellers(Long orderId, Long userId) {
         log.debug("Getting order sellers: orderId={}, userId={}", orderId, userId);
-
         Order order = getOrderWithValidation(orderId, userId, false);
 
-        Map<Long, List<OrderDetailResponse.OrderItemDetail>> sellerItems = new HashMap<>();
+        Map<Long, List<OrderDetailResponse.OrderItemDetail>> sellerItemsMap = new HashMap<>();
         List<OrderSellersResponse.SellerSummary> sellerSummaries = new ArrayList<>();
 
-        Map<Long, List<OrderItem>> itemsBySeller = order.getOrderItems().stream()
-                .collect(Collectors.groupingBy(item -> item.getSeller().getUserId()));
+        Map<User, List<OrderItem>> itemsBySellerPojo = order.getOrderItems().stream()
+                .collect(Collectors.groupingBy(OrderItem::getSeller));
 
-        for (Map.Entry<Long, List<OrderItem>> entry : itemsBySeller.entrySet()) {
-            Long sellerId = entry.getKey();
+        for (Map.Entry<User, List<OrderItem>> entry : itemsBySellerPojo.entrySet()) {
+            User seller = entry.getKey();
             List<OrderItem> items = entry.getValue();
-            OrderItem firstItem = items.getFirst();
 
-            // Convert items to detail format
             List<OrderDetailResponse.OrderItemDetail> itemDetails = items.stream()
                     .map(this::convertToItemDetail)
                     .collect(Collectors.toList());
+            sellerItemsMap.put(seller.getUserId(), itemDetails);
 
-            sellerItems.put(sellerId, itemDetails);
+            Set<OrderItemStatus> statuses = items.stream().map(OrderItem::getStatus).collect(Collectors.toSet());
+            String overallStatus = statuses.size() == 1 ? statuses.iterator().next().name() : "MIXED";
 
-            // Determine overall status for this seller
-            Set<OrderItemStatus> statuses = items.stream()
-                    .map(OrderItem::getStatus)
-                    .collect(Collectors.toSet());
-
-            String overallStatus = statuses.size() == 1 ?
-                    statuses.iterator().next().name() : "MIXED";
-
-            // Create seller summary
             OrderSellersResponse.SellerSummary summary = OrderSellersResponse.SellerSummary.builder()
-                    .sellerId(sellerId)
-                    .sellerUsername(firstItem.getSeller().getUsername())
-                    .sellerName(firstItem.getSeller().getFirstName() + " " + firstItem.getSeller().getLastName())
-                    .isLegitProfile(firstItem.getSeller().getIsLegitProfile())
+                    .sellerId(seller.getUserId())
+                    .sellerUsername(seller.getUsername())
+                    .sellerName(Optional.ofNullable(seller.getFirstName()).orElse("") + " " + Optional.ofNullable(seller.getLastName()).orElse(""))
+                    .isLegitProfile(seller.getIsLegitProfile())
                     .itemCount(items.size())
                     .overallStatus(overallStatus)
                     .build();
-
             sellerSummaries.add(summary);
         }
 
         return OrderSellersResponse.builder()
-                .sellerCount(sellerItems.size())
-                .itemsBySeller(sellerItems)
+                .sellerCount(sellerItemsMap.size())
+                .itemsBySeller(sellerItemsMap)
                 .sellerSummaries(sellerSummaries)
                 .build();
     }
@@ -500,35 +600,33 @@ public class OrderService {
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + itemRequest.getProductId()));
 
         if (!ProductStatus.ACTIVE.equals(product.getStatus())) {
-            throw new BusinessLogicException("Product is not available: " + product.getTitle());
+            throw new BusinessLogicException("Product '" + product.getTitle() + "' is not available for purchase (status: " + product.getStatus() + ").");
         }
 
         if (product.getSeller().getUserId().equals(buyerId)) {
             throw new BusinessLogicException("Cannot purchase your own product: " + product.getTitle());
         }
 
-        // Get price (from offer or product)
         BigDecimal itemPrice;
         Offer offer = null;
 
         if (itemRequest.getOfferId() != null) {
             offer = offerRepository.findById(itemRequest.getOfferId())
-                    .orElseThrow(() -> new ResourceNotFoundException("Offer not found"));
-
+                    .orElseThrow(() -> new ResourceNotFoundException("Offer not found: " + itemRequest.getOfferId()));
+            if (!offer.getProduct().getProductId().equals(product.getProductId())) {
+                throw new BusinessLogicException("Offer " + offer.getOfferId() + " does not match product " + product.getProductId());
+            }
             if (!OfferStatus.ACCEPTED.equals(offer.getStatus())) {
-                throw new BusinessLogicException("Offer is not accepted for product: " + product.getTitle());
+                throw new BusinessLogicException("Offer is not accepted for product: " + product.getTitle() + " (offer status: " + offer.getStatus() + ").");
             }
-
             if (!offer.getBuyer().getUserId().equals(buyerId)) {
-                throw new UnauthorizedException("Offer does not belong to buyer");
+                throw new UnauthorizedException("Offer " + offer.getOfferId() + " does not belong to buyer " + buyerId);
             }
-
             itemPrice = offer.getAmount();
         } else {
             itemPrice = product.getPrice();
         }
 
-        // Calculate fees
         BigDecimal platformFee = feeTierService.calculatePlatformFee(itemPrice, product.getSeller());
         BigDecimal feePercentage = feeTierService.calculateFeePercentage(itemPrice, product.getSeller());
 
@@ -547,76 +645,98 @@ public class OrderService {
                 .map(OrderItem::getStatus)
                 .toList();
 
-        // Count statuses
+        if (itemStatuses.isEmpty() && order.getStatus() == OrderStatus.PENDING) {
+            log.warn("Order {} has no items but is PENDING. Setting to CANCELLED.", order.getOrderId());
+            order.setStatus(OrderStatus.CANCELLED); // Or handle as an error, an order shouldn't really exist without items
+            return;
+        }
+        if (itemStatuses.isEmpty()) { // If items were removed entirely somehow
+            log.warn("Order {} has no items. Current status: {}. No status change applied.", order.getOrderId(), order.getStatus());
+            return;
+        }
+
+
         long totalItems = itemStatuses.size();
         long deliveredItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.DELIVERED).count();
-        long shippedItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.SHIPPED).count();
-        long processingItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.PROCESSING).count();
         long cancelledItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.CANCELLED).count();
+        long refundedItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.REFUNDED).count(); // Assuming REFUNDED is a terminal state like CANCELLED
+        long processingItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.PROCESSING).count();
         long pendingItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.PENDING).count();
+        long shippedItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.SHIPPED).count();
 
-        // Auto-update order status based on item statuses
-        if (deliveredItems == totalItems) {
-            order.setStatus(OrderStatus.DELIVERED);
-        } else if (cancelledItems == totalItems) {
-            order.setStatus(OrderStatus.CANCELLED);
-        } else if (shippedItems + deliveredItems > 0) {
-            order.setStatus(OrderStatus.SHIPPED);
-        } else if (processingItems > 0 && pendingItems == 0) {
-            order.setStatus(OrderStatus.PAID);
-        } else if (pendingItems > 0) {
+
+        if (pendingItems == totalItems && order.getStatus() != OrderStatus.PENDING) { // If all items somehow reverted to pending
             order.setStatus(OrderStatus.PENDING);
+        } else if (processingItems > 0 && pendingItems == 0 && shippedItems == 0 && deliveredItems == 0 && order.getStatus() != OrderStatus.PAID) {
+            // All items are either processing, cancelled, or refunded, but at least one is processing
+            // and none are further along the happy path.
+            order.setStatus(OrderStatus.PAID); // Implies payment was made, items are being processed
+        } else if (shippedItems > 0 && deliveredItems == 0 && order.getStatus() != OrderStatus.SHIPPED) {
+            // At least one item is shipped, none are delivered yet. Other items could be processing/cancelled/refunded.
+            order.setStatus(OrderStatus.SHIPPED);
+        } else if (deliveredItems > 0 && deliveredItems + cancelledItems + refundedItems == totalItems) {
+            // All items are either delivered, cancelled, or refunded, and at least one is delivered.
+            order.setStatus(OrderStatus.DELIVERED);
+        } else if (cancelledItems + refundedItems == totalItems) {
+            // All items are cancelled or refunded.
+            order.setStatus(OrderStatus.CANCELLED); // Or REFUNDED if that's a distinct overall state
+        } else if (pendingItems > 0) { // If any item is still pending, order is pending (unless already handled)
+            if (order.getStatus() != OrderStatus.PENDING && order.getStatus() != OrderStatus.PAID) { // Avoid regressing from PAID if some items are PENDING and others PROCESSING
+                order.setStatus(OrderStatus.PENDING);
+            }
         }
+        // If none of the above, the status might be a mix (e.g. some processing, some shipped - this is SHIPPED by above rule)
+        // Or some shipped, some delivered - this would be DELIVERED if all non-cancelled/refunded are delivered
+        log.debug("Overall order status for order {} determined as: {}", order.getOrderId(), order.getStatus());
     }
 
+
     private void validateItemStatusUpdate(OrderItemStatus currentStatus, OrderItemStatus newStatus, boolean isBuyer, boolean isSeller) {
+        // More granular checks can be added here based on who is initiating the change.
+        // For example, a seller cannot mark an item as DELIVERED. A buyer cannot mark as SHIPPED.
         switch (newStatus) {
-            case PROCESSING:
-                if (!isBuyer || !OrderItemStatus.PENDING.equals(currentStatus)) {
-                    throw new BusinessLogicException("Invalid status transition from " + currentStatus + " to " + newStatus);
+            case PROCESSING: // Typically after payment confirmation, usually system-driven or by admin. Buyer can't directly set this.
+                if (!OrderItemStatus.PENDING.equals(currentStatus)) {
+                    throw new BusinessLogicException("Item can only move to PROCESSING from PENDING status.");
                 }
+                // This is usually an internal status change post-payment, not directly by user role in this method.
                 break;
             case SHIPPED:
-                if (!isSeller || !OrderItemStatus.PROCESSING.equals(currentStatus)) {
-                    throw new BusinessLogicException("Only seller can mark item as shipped from PROCESSING status");
+                if (!isSeller) {
+                    throw new UnauthorizedException("Only the seller can mark an item as SHIPPED.");
+                }
+                if (!OrderItemStatus.PROCESSING.equals(currentStatus)) {
+                    throw new BusinessLogicException("Item can only be SHIPPED from PROCESSING status.");
                 }
                 break;
             case DELIVERED:
-                if (!isBuyer || !OrderItemStatus.SHIPPED.equals(currentStatus)) {
-                    throw new BusinessLogicException("Only buyer can confirm delivery from SHIPPED status");
+                if (!isBuyer) {
+                    throw new UnauthorizedException("Only the buyer can confirm an item as DELIVERED.");
+                }
+                if (!OrderItemStatus.SHIPPED.equals(currentStatus)) {
+                    throw new BusinessLogicException("Item can only be DELIVERED from SHIPPED status.");
                 }
                 break;
             case CANCELLED:
-                if (!OrderItemStatus.PENDING.equals(currentStatus) && !OrderItemStatus.PROCESSING.equals(currentStatus)) {
-                    throw new BusinessLogicException("Item can only be cancelled from PENDING or PROCESSING status");
+                if (!isItemCancellable(currentStatus)) { // isItemCancellable checks for PENDING or PROCESSING
+                    throw new BusinessLogicException("Item in status " + currentStatus + " cannot be cancelled through this flow.");
                 }
+                if (!isBuyer && !isSeller) { // Ensure either buyer or seller is making the request
+                    throw new UnauthorizedException("User is not authorized to cancel this item.");
+                }
+                // Further rules like "seller can only cancel if PROCESSING, buyer if PENDING" could be added if needed.
                 break;
+            case PENDING:
+            case REFUNDED: // These are typically results of other processes, not direct updates via this generic method.
+                throw new BusinessLogicException("Status " + newStatus + " cannot be set directly via this operation.");
             default:
-                throw new BusinessLogicException("Invalid status: " + newStatus);
+                // Should be caught by Enum.valueOf earlier, but as a safeguard:
+                throw new BusinessLogicException("Unsupported or invalid status transition to: " + newStatus);
         }
     }
 
     private boolean isItemCancellable(OrderItemStatus status) {
         return status == OrderItemStatus.PENDING || status == OrderItemStatus.PROCESSING;
-    }
-
-    private void cancelOrderItemInternal(OrderItem orderItem, String reason) {
-        // Update item status
-        orderItem.setStatus(OrderItemStatus.CANCELLED);
-        orderItem.setEscrowStatus(EscrowStatus.REFUNDED);
-
-        // Mark product as available again
-        orderItem.getProduct().setStatus(ProductStatus.ACTIVE);
-        orderItem.getProduct().setSoldAt(null);
-        productRepository.save(orderItem.getProduct());
-
-        // Update transaction
-        Optional<Transaction> transactionOpt = transactionRepository.findByOrderItemOrderItemId(orderItem.getOrderItemId());
-        if (transactionOpt.isPresent()) {
-            Transaction trans = transactionOpt.get();
-            trans.setStatus(TransactionStatus.CANCELLED);
-            transactionRepository.save(trans);
-        }
     }
 
     private boolean isSellerInOrder(Order order, Long userId) {
@@ -626,26 +746,28 @@ public class OrderService {
 
     private Order getOrderWithValidation(Long orderId, Long userId, boolean buyerOnly) {
         Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found"));
+                .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + orderId));
 
         boolean isBuyer = order.getBuyer().getUserId().equals(userId);
-        boolean isSeller = order.getOrderItems().stream()
+        boolean isSellerOfAtLeastOneItem = order.getOrderItems().stream()
                 .anyMatch(item -> item.getSeller().getUserId().equals(userId));
 
-        if (buyerOnly && !isBuyer) {
-            throw new UnauthorizedException("Not authorized to access this order");
+        if (buyerOnly) {
+            if (!isBuyer) {
+                throw new UnauthorizedException("User " + userId + " is not the buyer of order " + orderId);
+            }
+        } else { // Accessible by buyer or any seller involved in the order
+            if (!isBuyer && !isSellerOfAtLeastOneItem) {
+                throw new UnauthorizedException("User " + userId + " is not authorized to access order " + orderId);
+            }
         }
-
-        if (!buyerOnly && !isBuyer && !isSeller) {
-            throw new UnauthorizedException("Not authorized to access this order");
-        }
-
         return order;
     }
 
+    // --- Conversion and Helper Methods ---
     private OrderListResponse convertToListResponse(Order order) {
         List<OrderListResponse.OrderItemSummary> itemSummaries = order.getOrderItems().stream()
-                .limit(3) // Show first 3 items for preview
+                .limit(3)
                 .map(this::convertToItemSummary)
                 .collect(Collectors.toList());
 
@@ -653,28 +775,34 @@ public class OrderService {
                 .map(item -> item.getSeller().getUserId())
                 .collect(Collectors.toSet());
 
-        // Determine overall escrow status
         String overallEscrowStatus = "MIXED";
-        Set<EscrowStatus> escrowStatuses = order.getOrderItems().stream()
-                .map(OrderItem::getEscrowStatus)
-                .collect(Collectors.toSet());
-
-        if (escrowStatuses.size() == 1) {
-            overallEscrowStatus = escrowStatuses.iterator().next().name();
+        if (!order.getOrderItems().isEmpty()) {
+            Set<EscrowStatus> escrowStatuses = order.getOrderItems().stream()
+                    .map(OrderItem::getEscrowStatus)
+                    .collect(Collectors.toSet());
+            if (escrowStatuses.size() == 1) {
+                overallEscrowStatus = escrowStatuses.iterator().next().name();
+            }
+        } else {
+            overallEscrowStatus = "N/A"; // No items
         }
+
 
         return OrderListResponse.builder()
                 .orderId(order.getOrderId())
                 .status(order.getStatus().name())
                 .totalAmount(order.getTotalAmount())
+                // .totalShippingFee(order.getTotalShippingFee()) // If you add this to Order POJO
                 .totalItems(order.getOrderItems().size())
                 .uniqueSellers(uniqueSellerIds.size())
                 .createdAt(order.getCreatedAt())
                 .paidAt(order.getPaidAt())
+                .deliveredAt(order.getDeliveredAt()) // If you add this to Order POJO
                 .itemSummaries(itemSummaries)
                 .overallEscrowStatus(overallEscrowStatus)
                 .totalPlatformFee(order.getOrderItems().stream()
                         .map(OrderItem::getPlatformFee)
+                        .filter(Objects::nonNull)
                         .reduce(BigDecimal.ZERO, BigDecimal::add))
                 .build();
     }
@@ -686,7 +814,7 @@ public class OrderService {
                     .filter(ProductImage::getIsPrimary)
                     .map(ProductImage::getImageUrl)
                     .findFirst()
-                    .orElse(item.getProduct().getImages().getFirst().getImageUrl());
+                    .orElseGet(() -> item.getProduct().getImages().getFirst().getImageUrl()); // Fallback to first image
         }
 
         return OrderListResponse.OrderItemSummary.builder()
@@ -706,45 +834,49 @@ public class OrderService {
                 .map(this::convertToItemDetail)
                 .collect(Collectors.toList());
 
-        // Group items by seller
-        Map<String, List<OrderDetailResponse.OrderItemDetail>> itemsBySeller = orderItemDetails.stream()
-                .collect(Collectors.groupingBy(item -> item.getSeller().getUsername()));
+        Map<String, List<OrderDetailResponse.OrderItemDetail>> itemsBySellerUsername = orderItemDetails.stream()
+                .collect(Collectors.groupingBy(itemDetail -> itemDetail.getSeller().getUsername()));
 
         BigDecimal totalPlatformFee = order.getOrderItems().stream()
                 .map(OrderItem::getPlatformFee)
+                .filter(Objects::nonNull)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
         Set<Long> uniqueSellerIds = order.getOrderItems().stream()
                 .map(item -> item.getSeller().getUserId())
                 .collect(Collectors.toSet());
 
-        // Build escrow summary
         OrderDetailResponse.OrderEscrowSummary escrowSummary = buildEscrowSummary(order.getOrderItems());
 
-        // Build shipping address
-        OrderDetailResponse.ShippingAddressInfo shippingAddressInfo = OrderDetailResponse.ShippingAddressInfo.builder()
-                .addressId(order.getShippingAddress().getAddressId())
-                .addressLine1(order.getShippingAddress().getAddressLine1())
-                .addressLine2(order.getShippingAddress().getAddressLine2())
-                .city(order.getShippingAddress().getCity())
-                .state(order.getShippingAddress().getState())
-                .postalCode(order.getShippingAddress().getPostalCode())
-                .country(order.getShippingAddress().getCountry())
-                .build();
+        UserAddress sa = order.getShippingAddress();
+        OrderDetailResponse.ShippingAddressInfo shippingAddressInfo = (sa != null) ?
+                OrderDetailResponse.ShippingAddressInfo.builder()
+                        .addressId(sa.getAddressId())
+                        .addressLine1(sa.getAddressLine1())
+                        .addressLine2(sa.getAddressLine2())
+                        .city(sa.getCity())
+                        .state(sa.getState())
+                        .postalCode(sa.getPostalCode())
+                        .country(sa.getCountry())
+                        .build() : null;
 
         return OrderDetailResponse.builder()
                 .orderId(order.getOrderId())
                 .status(order.getStatus().name())
                 .totalAmount(order.getTotalAmount())
+                // .totalShippingFee(order.getTotalShippingFee()) // If added
                 .totalPlatformFee(totalPlatformFee)
+                // .notes(order.getNotes()) // If added to Order POJO
                 .totalItems(order.getOrderItems().size())
                 .uniqueSellers(uniqueSellerIds.size())
                 .createdAt(order.getCreatedAt())
                 .paidAt(order.getPaidAt())
+                .shippedAt(order.getShippedAt()) // If added to Order POJO
+                .deliveredAt(order.getDeliveredAt()) // If added to Order POJO
                 .orderItems(orderItemDetails)
                 .shippingAddress(shippingAddressInfo)
                 .escrowSummary(escrowSummary)
-                .itemsBySeller(itemsBySeller)
+                .itemsBySeller(itemsBySellerUsername)
                 .build();
     }
 
@@ -756,7 +888,7 @@ public class OrderService {
                     .filter(ProductImage::getIsPrimary)
                     .map(ProductImage::getImageUrl)
                     .findFirst()
-                    .orElse(product.getImages().getFirst().getImageUrl());
+                    .orElseGet(() -> product.getImages().getFirst().getImageUrl());
         }
 
         OrderDetailResponse.ProductInfo productInfo = OrderDetailResponse.ProductInfo.builder()
@@ -767,23 +899,24 @@ public class OrderService {
                 .size(product.getSize())
                 .color(product.getColor())
                 .primaryImageUrl(primaryImageUrl)
+                // .shippingFee(product.getShippingFee()) // If Product has shipping fee
                 .categoryId(product.getCategory().getCategoryId())
                 .categoryName(product.getCategory().getName())
                 .brandId(product.getBrand().getBrandId())
                 .brandName(product.getBrand().getName())
                 .build();
 
+        User seller = item.getSeller();
         OrderDetailResponse.SellerInfo sellerInfo = OrderDetailResponse.SellerInfo.builder()
-                .userId(item.getSeller().getUserId())
-                .username(item.getSeller().getUsername())
-                .firstName(item.getSeller().getFirstName())
-                .lastName(item.getSeller().getLastName())
-                .isLegitProfile(item.getSeller().getIsLegitProfile())
-                .sellerRating(item.getSeller().getSellerRating())
-                .sellerReviewsCount(item.getSeller().getSellerReviewsCount())
+                .userId(seller.getUserId())
+                .username(seller.getUsername())
+                .firstName(seller.getFirstName())
+                .lastName(seller.getLastName())
+                .isLegitProfile(seller.getIsLegitProfile())
+                .sellerRating(seller.getSellerRating())
+                .sellerReviewsCount(seller.getSellerReviewsCount())
                 .build();
 
-        // Get transaction info if available
         OrderDetailResponse.TransactionInfo transactionInfo = null;
         Optional<Transaction> transactionOpt = transactionRepository.findByOrderItemOrderItemId(item.getOrderItemId());
         if (transactionOpt.isPresent()) {
@@ -805,6 +938,7 @@ public class OrderService {
                 .feePercentage(item.getFeePercentage())
                 .status(item.getStatus().name())
                 .escrowStatus(item.getEscrowStatus().name())
+                // .notes(item.getNotes()) // If OrderItem has notes
                 .product(productInfo)
                 .seller(sellerInfo)
                 .transaction(transactionInfo)
@@ -812,51 +946,42 @@ public class OrderService {
     }
 
     private OrderDetailResponse.OrderEscrowSummary buildEscrowSummary(List<OrderItem> orderItems) {
-        BigDecimal totalEscrowAmount = orderItems.stream()
-                .map(OrderItem::getPrice)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
+        if (orderItems.isEmpty()) {
+            return OrderDetailResponse.OrderEscrowSummary.builder()
+                    .totalEscrowAmount(BigDecimal.ZERO)
+                    .totalPlatformFee(BigDecimal.ZERO)
+                    .totalSellerAmount(BigDecimal.ZERO)
+                    .itemsInEscrow(0).itemsReleased(0).itemsRefunded(0)
+                    .sellerEscrows(Collections.emptyList())
+                    .build();
+        }
 
-        BigDecimal totalPlatformFee = orderItems.stream()
-                .map(OrderItem::getPlatformFee)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-
+        BigDecimal totalEscrowAmount = orderItems.stream().map(OrderItem::getPrice).reduce(BigDecimal.ZERO, BigDecimal::add);
+        BigDecimal totalPlatformFee = orderItems.stream().map(OrderItem::getPlatformFee).reduce(BigDecimal.ZERO, BigDecimal::add);
         BigDecimal totalSellerAmount = totalEscrowAmount.subtract(totalPlatformFee);
 
         Map<EscrowStatus, Long> statusCounts = orderItems.stream()
                 .collect(Collectors.groupingBy(OrderItem::getEscrowStatus, Collectors.counting()));
 
-        // Group by seller for escrow breakdown
-        Map<Long, List<OrderItem>> itemsBySeller = orderItems.stream()
-                .collect(Collectors.groupingBy(item -> item.getSeller().getUserId()));
-
-        List<OrderDetailResponse.SellerEscrowInfo> sellerEscrows = itemsBySeller.values().stream()
-                .map(sellerItems -> {
-                    OrderItem firstItem = sellerItems.getFirst();
-
-                    BigDecimal sellerEscrowAmount = sellerItems.stream()
-                            .map(OrderItem::getPrice)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                    BigDecimal sellerPlatformFee = sellerItems.stream()
-                            .map(OrderItem::getPlatformFee)
-                            .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                    // Determine overall escrow status for this seller
-                    Set<EscrowStatus> sellerEscrowStatuses = sellerItems.stream()
-                            .map(OrderItem::getEscrowStatus)
-                            .collect(Collectors.toSet());
-
-                    String escrowStatus = sellerEscrowStatuses.size() == 1 ?
-                            sellerEscrowStatuses.iterator().next().name() : "MIXED";
+        List<OrderDetailResponse.SellerEscrowInfo> sellerEscrows = orderItems.stream()
+                .collect(Collectors.groupingBy(item -> item.getSeller().getUserId()))
+                .entrySet().stream()
+                .map(entry -> {
+                    User seller = userRepository.findById(entry.getKey()).orElseThrow(); // Should exist
+                    List<OrderItem> sellerOrderItems = entry.getValue();
+                    BigDecimal sellerItemsTotal = sellerOrderItems.stream().map(OrderItem::getPrice).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    BigDecimal sellerItemsFee = sellerOrderItems.stream().map(OrderItem::getPlatformFee).reduce(BigDecimal.ZERO, BigDecimal::add);
+                    Set<EscrowStatus> sellerEscrowStatuses = sellerOrderItems.stream().map(OrderItem::getEscrowStatus).collect(Collectors.toSet());
+                    String escrowStatusName = sellerEscrowStatuses.size() == 1 ? sellerEscrowStatuses.iterator().next().name() : "MIXED";
 
                     return OrderDetailResponse.SellerEscrowInfo.builder()
-                            .sellerId(firstItem.getSeller().getUserId())
-                            .sellerUsername(firstItem.getSeller().getUsername())
-                            .escrowAmount(sellerEscrowAmount)
-                            .platformFee(sellerPlatformFee)
-                            .sellerAmount(sellerEscrowAmount.subtract(sellerPlatformFee))
-                            .escrowStatus(escrowStatus)
-                            .itemCount(sellerItems.size())
+                            .sellerId(seller.getUserId())
+                            .sellerUsername(seller.getUsername())
+                            .escrowAmount(sellerItemsTotal)
+                            .platformFee(sellerItemsFee)
+                            .sellerAmount(sellerItemsTotal.subtract(sellerItemsFee))
+                            .escrowStatus(escrowStatusName)
+                            .itemCount(sellerOrderItems.size())
                             .build();
                 })
                 .collect(Collectors.toList());

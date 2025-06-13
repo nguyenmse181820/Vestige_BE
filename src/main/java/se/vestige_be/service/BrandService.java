@@ -3,6 +3,7 @@ package se.vestige_be.service;
 import lombok.AllArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import se.vestige_be.dto.response.BrandResponse;
 import se.vestige_be.pojo.Brand;
 import se.vestige_be.repository.BrandRepository;
 
@@ -14,8 +15,18 @@ import java.util.List;
 public class BrandService {
     private final BrandRepository brandRepository;
 
-    public List<Brand> findAll() {
-        return brandRepository.findAll();
+    public List<BrandResponse> findAll() {
+        return brandRepository.findAll().stream()
+                .map(this::convertToDTO)
+                .toList();
+    }
+    private BrandResponse convertToDTO(Brand brand) {
+        return BrandResponse.builder()
+                .brandId(brand.getBrandId())
+                .name(brand.getName())
+                .logoUrl(brand.getLogoUrl())
+                .createdAt(brand.getCreatedAt())
+                .build();
     }
 
     @Transactional

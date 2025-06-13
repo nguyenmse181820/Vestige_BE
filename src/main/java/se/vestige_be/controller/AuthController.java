@@ -9,6 +9,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.UsernamePasswordAuthenticationToken;
 import org.springframework.security.core.Authentication;
+import org.springframework.security.core.GrantedAuthority;
 import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
@@ -27,7 +28,9 @@ import se.vestige_be.service.RefreshTokenService;
 import se.vestige_be.service.UserService;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.stream.Collectors;
 
 @RestController
 @RequestMapping("/api/auth")
@@ -54,7 +57,14 @@ public class AuthController {
         UserDetails userDetails = (UserDetails) authentication.getPrincipal();
         User user = userService.processLogin(userDetails.getUsername());
 
-        String accessToken = jwtTokenUtil.generateToken(userDetails);
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("email", user.getEmail());
+        String userRole = (user.getRole() != null && user.getRole().getName() != null)
+                ? user.getRole().getName().toUpperCase()
+                : "USER";
+        claims.put("role", userRole);
+
+        String accessToken = jwtTokenUtil.generateToken(userDetails, claims);
         RefreshToken refreshToken = refreshTokenService.createNewRefreshTokenFamily(userDetails.getUsername());
 
         return ResponseEntity.ok(AuthResponse.builder()
@@ -77,7 +87,15 @@ public class AuthController {
 
                             User user = refreshToken.getUser();
                             UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
-                            String accessToken = jwtTokenUtil.generateToken(userDetails);
+
+                            Map<String, Object> claims = new HashMap<>();
+                            claims.put("email", user.getEmail());
+                            String userRole = (user.getRole() != null && user.getRole().getName() != null)
+                                    ? user.getRole().getName().toUpperCase()
+                                    : "USER";
+                            claims.put("role", userRole);
+
+                            String accessToken = jwtTokenUtil.generateToken(userDetails, claims);
                             RefreshToken newRefreshToken = refreshTokenService.rotateRefreshToken(refreshToken);
 
                             return ResponseEntity.ok(AuthResponse.builder()
@@ -181,7 +199,15 @@ public class AuthController {
 
         User user = userService.register(registerRequest);
         UserDetails userDetails = userDetailsService.loadUserByUsername(user.getUsername());
-        String accessToken = jwtTokenUtil.generateToken(userDetails);
+
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("email", user.getEmail());
+        String userRole = (user.getRole() != null && user.getRole().getName() != null)
+                ? user.getRole().getName().toUpperCase()
+                : "USER";
+        claims.put("role", userRole);
+
+        String accessToken = jwtTokenUtil.generateToken(userDetails, claims);
         RefreshToken refreshToken = refreshTokenService.createNewRefreshTokenFamily(userDetails.getUsername());
 
         return ResponseEntity.status(HttpStatus.CREATED).body(

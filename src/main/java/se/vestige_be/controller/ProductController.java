@@ -59,7 +59,7 @@ public class ProductController {
                 .minPrice(minPrice)
                 .maxPrice(maxPrice)
                 .condition(condition)
-                .status(status != null ? status : "ACTIVE")
+                .status(status)
                 .sellerId(sellerId)
                 .build();
 
@@ -80,6 +80,7 @@ public class ProductController {
         PagedResponse<ProductListResponse> pagedResponse = PagedResponse.of(products, filters);
 
         return ResponseEntity.ok(ApiResponse.<PagedResponse<ProductListResponse>>builder()
+                .status(HttpStatus.OK.toString())
                 .message("Products retrieved successfully")
                 .data(pagedResponse)
                 .build());
@@ -98,8 +99,36 @@ public class ProductController {
                 .orElse(ResponseEntity.status(HttpStatus.NOT_FOUND)
                         .body(ApiResponse.<ProductDetailResponse>builder()
                                 .status(HttpStatus.NOT_FOUND.toString())
-                                .message("Product not found")
+                                .message("Product not found with ID: " + id)
                                 .build()));
+    }
+    @GetMapping("/all-statuses")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PagedResponse<ProductListResponse>>> getAllProductsWithAnyStatus(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "20") int size,
+            @RequestParam(defaultValue = "createdAt") String sortBy,
+            @RequestParam(defaultValue = "desc") String sortDir,
+            @RequestParam(required = false) String search,
+            @RequestParam(required = false) Long categoryId,
+            @RequestParam(required = false) Long brandId,
+            @RequestParam(required = false) BigDecimal minPrice,
+            @RequestParam(required = false) BigDecimal maxPrice,
+            @RequestParam(required = false) String condition,
+            @RequestParam(required = false) String status,
+            @RequestParam(required = false) Long sellerId) {
+
+        PagedResponse<ProductListResponse> pagedResponse = productService.getAllProductsWithAnyStatus(
+                page, size, sortBy, sortDir,
+                search, categoryId, brandId, minPrice, maxPrice,
+                condition, status, sellerId
+        );
+
+        return ResponseEntity.ok(ApiResponse.<PagedResponse<ProductListResponse>>builder()
+                .status(HttpStatus.OK.toString())
+                .message("All products with any status retrieved successfully for admin.")
+                .data(pagedResponse)
+                .build());
     }
 
     @GetMapping("/my-products")
@@ -109,7 +138,7 @@ public class ProductController {
             @RequestParam(defaultValue = "12") int size,
             @RequestParam(defaultValue = "createdAt") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
-            @RequestParam(required = false) String status,
+            @RequestParam(required = false) String status, // ProductStatus
             @AuthenticationPrincipal UserDetails userDetails) {
 
         User user = userService.findByUsername(userDetails.getUsername());
@@ -122,40 +151,32 @@ public class ProductController {
         Pageable pageable = PaginationUtils.createPageable(page, size, sortBy, sortDir);
         Page<ProductListResponse> products = productService.getProducts(filterDto, pageable);
 
-        Map<String, Object> filters = Map.of("sellerId", user.getUserId());
-        if (status != null) {
-            filters = Map.of("sellerId", user.getUserId(), "status", status);
-        }
 
-        PagedResponse<ProductListResponse> pagedResponse = PagedResponse.of(products, filters);
+        PagedResponse<ProductListResponse> pagedResponse = PagedResponse.of(products,
+                Map.of("sellerId", user.getUserId(), "status", status != null ? status : "ALL (for seller)"));
+
 
         return ResponseEntity.ok(ApiResponse.<PagedResponse<ProductListResponse>>builder()
+                .status(HttpStatus.OK.toString())
                 .message("Your products retrieved successfully")
                 .data(pagedResponse)
                 .build());
     }
+
 
     @PostMapping
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<ApiResponse<ProductDetailResponse>> createProduct(
             @Valid @RequestBody ProductCreateRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-
         User user = userService.findByUsername(userDetails.getUsername());
-
-        try {
-            ProductDetailResponse product = productService.createProduct(request, user.getUserId());
-            return ResponseEntity.status(HttpStatus.CREATED)
-                    .body(ApiResponse.<ProductDetailResponse>builder()
-                            .message("Product created successfully")
-                            .data(product)
-                            .build());
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ApiResponse.<ProductDetailResponse>builder()
-                            .message(e.getMessage())
-                            .build());
-        }
+        ProductDetailResponse product = productService.createProduct(request, user.getUserId());
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.<ProductDetailResponse>builder()
+                        .status(HttpStatus.CREATED.toString())
+                        .message("Product created successfully")
+                        .data(product)
+                        .build());
     }
 
     @PatchMapping("/{id}")
@@ -164,21 +185,13 @@ public class ProductController {
             @PathVariable Long id,
             @Valid @RequestBody ProductUpdateRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
-
         User user = userService.findByUsername(userDetails.getUsername());
-
-        try {
-            ProductDetailResponse product = productService.updateProduct(id, request, user.getUserId());
-            return ResponseEntity.ok(ApiResponse.<ProductDetailResponse>builder()
-                    .message("Product updated successfully")
-                    .data(product)
-                    .build());
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ApiResponse.<ProductDetailResponse>builder()
-                            .message(e.getMessage())
-                            .build());
-        }
+        ProductDetailResponse product = productService.updateProduct(id, request, user.getUserId());
+        return ResponseEntity.ok(ApiResponse.<ProductDetailResponse>builder()
+                .status(HttpStatus.OK.toString())
+                .message("Product updated successfully")
+                .data(product)
+                .build());
     }
 
     @DeleteMapping("/{id}")
@@ -186,43 +199,47 @@ public class ProductController {
     public ResponseEntity<ApiResponse<Void>> deleteProduct(
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetails userDetails) {
-
         User user = userService.findByUsername(userDetails.getUsername());
         productService.deleteProduct(id, user.getUserId());
-
         return ResponseEntity.ok(ApiResponse.<Void>builder()
-                .message("Product deleted successfully")
+                .status(HttpStatus.OK.toString())
+                .message("Product marked as deleted successfully")
                 .build());
     }
 
-    @PostMapping("/{id}/images")
+    @PatchMapping("/{id}/images")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<ProductDetailResponse>> addProductImage(
-            @PathVariable Long id,
+    public ResponseEntity<ApiResponse<ProductDetailResponse>> manageProductImage(
+            @PathVariable("id") Long productId,
             @Valid @RequestBody ProductImageRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {
 
         User user = userService.findByUsername(userDetails.getUsername());
-        ProductDetailResponse product = productService.addProductImage(id, request, user.getUserId());
+        ProductDetailResponse product = productService.manageProductImage(productId, request, user.getUserId());
 
-        return ResponseEntity.status(HttpStatus.CREATED)
+        String message;
+        HttpStatus status;
+
+        if (request.getImageId() != null) {
+            if (request.getActive() != null && !request.getActive()) {
+                message = "Image soft-deleted successfully.";
+            } else if (request.getActive() != null){
+                message = "Image reactivated/updated successfully.";
+            }
+            else {
+                message = "Image updated successfully.";
+            }
+            status = HttpStatus.OK;
+        } else {
+            message = "Image added successfully.";
+            status = HttpStatus.CREATED;
+        }
+
+        return ResponseEntity.status(status)
                 .body(ApiResponse.<ProductDetailResponse>builder()
-                        .message("Image added successfully")
+                        .status(status.toString())
+                        .message(message)
                         .data(product)
                         .build());
-    }
-    @DeleteMapping("/{id}/images/{imageId}")    
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<Void>> deleteProductImage(
-            @PathVariable Long id,
-            @PathVariable Long imageId,
-            @AuthenticationPrincipal UserDetails userDetails) {
-
-        User user = userService.findByUsername(userDetails.getUsername());
-        productService.deleteProductImage(id, imageId, user.getUserId());
-
-        return ResponseEntity.ok(ApiResponse.<Void>builder()
-                .message("Image deleted successfully")
-                .build());
     }
 }

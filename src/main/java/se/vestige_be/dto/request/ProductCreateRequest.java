@@ -24,11 +24,11 @@ public class ProductCreateRequest {
     @Size(min = 10, max = 5000, message = "Description must be between 10 and 5000 characters")
     private String description;
 
-    @NotNull(message = "Price is required")
     @DecimalMin(value = "0.01", message = "Price must be greater than 0")
     @DecimalMax(value = "99999999.99", message = "Price cannot exceed 99,999,999.99 VND")
     private BigDecimal price;
 
+    @NotNull(message = "Price is required")
     @DecimalMin(value = "0.01", message = "Original price must be greater than 0")
     @DecimalMax(value = "99999999.99", message = "Original price cannot exceed 99,999,999.99 VND")
     private BigDecimal originalPrice;

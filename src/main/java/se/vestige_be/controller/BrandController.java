@@ -7,8 +7,11 @@ import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
 import se.vestige_be.dto.request.BrandRequest;
+import se.vestige_be.dto.response.BrandResponse;
 import se.vestige_be.dto.response.ObjectResponse;
 import se.vestige_be.service.BrandService;
+
+import java.util.List;
 
 @RestController
 @RequestMapping("/api/brands")
@@ -19,11 +22,12 @@ public class BrandController {
 
     @GetMapping
     public ResponseEntity<?> getAllBrands() {
+        List<BrandResponse> brandDTOs = brandService.findAll();
         return ResponseEntity.ok(
                 ObjectResponse.builder()
                         .status(HttpStatus.OK.toString())
                         .message("Successfully retrieved brands")
-                        .data(brandService.findAll())
+                        .data(brandDTOs)
                         .build()
         );
     }

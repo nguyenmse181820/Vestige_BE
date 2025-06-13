@@ -8,11 +8,13 @@ import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import se.vestige_be.dto.request.AdminCreateUserRequest;
 import se.vestige_be.dto.request.RegisterRequest;
 import se.vestige_be.dto.request.UpdateProfileRequest;
 import se.vestige_be.dto.response.PagedResponse;
 import se.vestige_be.dto.response.UserListResponse;
 import se.vestige_be.dto.response.UserProfileResponse;
+import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.pojo.Role;
 import se.vestige_be.pojo.User;
@@ -221,6 +223,47 @@ public class UserService {
                 .totalProductsListed(totalProductsListed.intValue())
                 .activeProductsCount(activeProductsCount.intValue())
                 .build();
+    }
+
+    @Transactional
+    public UserProfileResponse createUserByAdmin(AdminCreateUserRequest request) {
+        if (userRepository.existsByUsername(request.getUsername())) {
+            throw new BusinessLogicException("Username '" + request.getUsername() + "' already exists.");
+        }
+
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new BusinessLogicException("Email '" + request.getEmail() + "' already exists.");
+        }
+
+        Role roleToAssign = roleRepository.findByName(request.getRoleName().toUpperCase())
+                .orElseThrow(() -> {
+                    return new BusinessLogicException("Role '" + request.getRoleName() + "' not found. Ensure roles like USER, ADMIN exist.");
+                });
+
+        User user = User.builder()
+                .username(request.getUsername())
+                .email(request.getEmail())
+                .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .firstName(request.getFirstName())
+                .lastName(request.getLastName())
+                .phoneNumber(request.getPhoneNumber())
+                .dateOfBirth(request.getDateOfBirth())
+                .gender(request.getGender())
+                .role(roleToAssign)
+                .isVerified(request.getIsVerified() != null ? request.getIsVerified() : false)
+                .isLegitProfile(request.getIsLegitProfile() != null ? request.getIsLegitProfile() : false)
+                .accountStatus(request.getAccountStatus() != null ? request.getAccountStatus().toLowerCase() : "active")
+                .sellerRating(BigDecimal.ZERO)
+                .sellerReviewsCount(0)
+                .successfulTransactions(0)
+                .trustScore(BigDecimal.ZERO)
+                .joinedDate(LocalDateTime.now())
+                .addresses(new ArrayList<>())
+                .memberships(new ArrayList<>())
+                .build();
+
+        User savedUser = userRepository.save(user);
+        return convertToProfileResponse(savedUser);
     }
 
     private UserProfileResponse convertToProfileResponse(User user) {

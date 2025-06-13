@@ -19,7 +19,14 @@ public class CategoryController {
 
     @GetMapping
     public ResponseEntity<?> getCategories() {
-        return ResponseEntity.ok(categoryService.findAll());
+        return ResponseEntity.status(HttpStatus.OK).body(
+                ObjectResponse.builder()
+                        .status(HttpStatus.OK.toString())
+                        .message("Successfully retrieved categories")
+                        .data(categoryService.findAll())
+                        .build()
+        );
+
     }
 
     @PostMapping()
