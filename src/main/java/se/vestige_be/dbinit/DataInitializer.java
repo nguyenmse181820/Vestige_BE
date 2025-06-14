@@ -252,7 +252,7 @@ public class DataInitializer implements CommandLineRunner {
                 // Order 2: PAID (Items PROCESSING) - John buys iPhone from Mike
                 Order order2 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
-                        .paymentMethod(PaymentMethod.VNPAY)
+                        .paymentMethod(PaymentMethod.STRIPE_CARD)
                         .totalAmount(iphone.getPrice())
                         .status(OrderStatus.PAID).paidAt(LocalDateTime.now().minusDays(4)).createdAt(LocalDateTime.now().minusDays(4))
                         .build();
@@ -307,7 +307,7 @@ public class DataInitializer implements CommandLineRunner {
 
                 Order order4 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
-                        .paymentMethod(PaymentMethod.VNPAY)
+                        .paymentMethod(PaymentMethod.STRIPE_CARD)
                         .totalAmount(anotherElectronic.getPrice())
                         .status(OrderStatus.DELIVERED)
                         .paidAt(LocalDateTime.now().minusDays(10))

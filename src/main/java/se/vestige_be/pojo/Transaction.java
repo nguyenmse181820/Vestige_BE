@@ -86,6 +86,8 @@ public class Transaction {
 
     private String stripePaymentIntentId;
 
+    private String stripeTransferId;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 

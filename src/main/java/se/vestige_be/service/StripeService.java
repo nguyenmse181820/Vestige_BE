@@ -9,6 +9,7 @@ import jakarta.annotation.PostConstruct;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.pojo.OrderItem;
@@ -20,7 +21,6 @@ import java.util.HashMap;
 import java.util.Map;
 
 @Service
-@RequiredArgsConstructor
 @Slf4j
 public class StripeService {
 
@@ -29,6 +29,14 @@ public class StripeService {
 
     @Value("${stripe.currency:vnd}")
     private String currency;
+
+    private final OrderService orderService;
+    private final UserService userService;
+
+    public StripeService(@Lazy OrderService orderService, @Lazy UserService userService) {
+        this.orderService = orderService;
+        this.userService = userService;
+    }
 
     @PostConstruct
     public void init() {
@@ -112,7 +120,7 @@ public class StripeService {
     /**
      * Creates a PaymentIntent to charge buyer - funds held in platform account for escrow
      */
-    public String createPlatformCharge(BigDecimal totalAmount, Long orderId) throws StripeException {
+    public PaymentIntent createPlatformCharge(BigDecimal totalAmount, Long orderId) throws StripeException {
         try {
             long amountInVND = totalAmount.longValue();
 
@@ -132,7 +140,7 @@ public class StripeService {
             PaymentIntent paymentIntent = PaymentIntent.create(params);
             log.info("Created PaymentIntent {} for order {} amount {} VND",
                     paymentIntent.getId(), orderId, amountInVND);
-            return paymentIntent.getId();
+            return paymentIntent; // <-- Trả về cả đối tượng PaymentIntent
         } catch (StripeException e) {
             log.error("Failed to create payment intent for order {}: {}", orderId, e.getMessage());
             throw e;
@@ -346,40 +354,60 @@ public class StripeService {
      * Handles webhook events for automated processing
      */
     public void processWebhookEvent(Event event) {
+        StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
+
+        if (stripeObject == null) {
+            log.error("Stripe object not found in webhook event data. Event ID: {}", event.getId());
+            return;
+        }
+
         try {
             switch (event.getType()) {
-                case "account.updated":
-                    log.info("Seller account updated - Event ID: {}", event.getId());
-                    break;
                 case "payment_intent.succeeded":
-                    StripeObject object = event.getData().getObject();
-                    if (object instanceof PaymentIntent paymentIntent) {
-                        log.info("Payment succeeded: {}", paymentIntent.getId());
+                    if (stripeObject instanceof PaymentIntent paymentIntent) {
+                        log.info("Payment succeeded via webhook for PI: {}", paymentIntent.getId());
+                        orderService.handleSuccessfulPayment(paymentIntent.getId());
                     }
                     break;
-                case "transfer.created":
-                    StripeObject transferObject = event.getData().getObject();
-                    if (transferObject instanceof Transfer transfer) {
-                        log.info("Transfer created: {}", transfer.getId());
+
+                case "account.updated":
+                    if (stripeObject instanceof Account account) {
+                        log.info("Account updated via webhook for Account ID: {}", account.getId());
+                        userService.handleStripeAccountUpdate(account);
                     }
                     break;
-                case "payout.created":
-                    StripeObject payoutObject = event.getData().getObject();
-                    if (payoutObject instanceof Payout payout) {
-                        log.info("Payout created: {}", payout.getId());
-                    }
-                    break;
+
                 case "charge.dispute.created":
-                    log.warn("Dispute created - Event ID: {}", event.getId());
+                    if (stripeObject instanceof Dispute dispute) {
+                        orderService.handleChargeDisputeCreated(dispute);
+                    }
                     break;
+
                 case "transfer.failed":
-                    log.error("Transfer failed - Event ID: {}", event.getId());
+                    if (stripeObject instanceof Transfer transfer) {
+                        orderService.handleTransferFailed(transfer);
+                    }
                     break;
+
+                case "transfer.created":
+                    if (stripeObject instanceof Transfer transfer) {
+                        orderService.handleTransferCreated(transfer);
+                    }
+                    break;
+
+                case "payout.created":
+                    if (stripeObject instanceof Payout payout) {
+                        // Ghi log là đủ cho nhu cầu hiện tại
+                        log.info("Payout {} of {} {} created for seller. Destination: {}",
+                                payout.getId(), payout.getAmount(), payout.getCurrency().toUpperCase(), payout.getDestination());
+                    }
+                    break;
+
                 default:
                     log.debug("Unhandled webhook event: {} - Event ID: {}", event.getType(), event.getId());
             }
         } catch (Exception e) {
-            log.error("Error processing webhook event {} (ID: {}): {}", event.getType(), event.getId(), e.getMessage());
+            log.error("Error processing webhook event {} (ID: {}): {}", event.getType(), event.getId(), e.getMessage(), e);
         }
     }
 

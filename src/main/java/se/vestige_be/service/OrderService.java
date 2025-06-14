@@ -1,5 +1,8 @@
 package se.vestige_be.service;
 
+import com.stripe.model.Dispute;
+import com.stripe.model.PaymentIntent;
+import com.stripe.model.Transfer;
 import lombok.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
@@ -41,24 +44,18 @@ public class OrderService {
 
     @Transactional
     public OrderDetailResponse createOrder(OrderCreateRequest request, Long buyerId) {
-        // 1. Validate buyer and shipping address
         User buyer = userRepository.findById(buyerId)
                 .orElseThrow(() -> new ResourceNotFoundException("Buyer not found with ID: " + buyerId));
-
         UserAddress shippingAddress = userAddressRepository.findById(request.getShippingAddressId())
                 .orElseThrow(() -> new ResourceNotFoundException("Shipping address not found with ID: " + request.getShippingAddressId()));
-
         if (!shippingAddress.getUser().getUserId().equals(buyerId)) {
             throw new UnauthorizedException("Shipping address does not belong to the buyer");
         }
-
-        // 2. Validate items and calculate total
         List<OrderItemData> itemDataList = validateAndProcessItems(request.getItems(), buyerId);
         BigDecimal totalAmount = itemDataList.stream()
                 .map(OrderItemData::getItemPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
 
-        // 3. Create order
         Order order = Order.builder()
                 .buyer(buyer)
                 .totalAmount(totalAmount)
@@ -68,39 +65,26 @@ public class OrderService {
                 .build();
         order = orderRepository.save(order);
 
-        // 4. Create order items
-        List<OrderItem> orderItems = createOrderItems(itemDataList, order);
-        order.setOrderItems(orderItems);
-
-        // 5. Create transactions
-        createTransactions(orderItems, buyer, shippingAddress);
-
-        // 6. Mark products as pending payment
-        markProductsAsPendingPayment(itemDataList);
-
-        // 7. Prepare response based on payment method
-        OrderDetailResponse response = convertToDetailResponse(order);
-
-        if (request.getPaymentMethod() == PaymentMethod.VNPAY) {
-            // Create Stripe PaymentIntent for VNPay (treating as card payment)
+        String paymentIntentId = null;
+        String clientSecret = null;
+        if (request.getPaymentMethod() == PaymentMethod.STRIPE_CARD) {
             try {
-                String paymentIntentId = stripeService.createPlatformCharge(totalAmount, order.getOrderId());
-
-                // Store payment intent ID in the first transaction (for single item orders)
-                Transaction transaction = transactionRepository.findByOrderItemOrderItemId(
-                        order.getOrderItems().get(0).getOrderItemId()
-                ).orElseThrow();
-                transaction.setStripePaymentIntentId(paymentIntentId);
-                transactionRepository.save(transaction);
-
-                response.setMetadata(Map.of(
-                        "stripePaymentIntentId", paymentIntentId,
-                        "requiresPayment", true
-                ));
+                PaymentIntent paymentIntent = stripeService.createPlatformCharge(order.getTotalAmount(), order.getOrderId());
+                paymentIntentId = paymentIntent.getId();
+                clientSecret = paymentIntent.getClientSecret();
             } catch (Exception e) {
                 log.error("Failed to create Stripe payment for order {}: {}", order.getOrderId(), e.getMessage());
                 throw new BusinessLogicException("Could not initialize payment. Please try again later.");
             }
+        }
+
+        List<OrderItem> orderItems = createOrderItems(itemDataList, order);
+        order.setOrderItems(orderItems);
+        createTransactions(orderItems, buyer, shippingAddress, paymentIntentId);
+        markProductsAsPendingPayment(itemDataList);
+        OrderDetailResponse response = convertToDetailResponse(order);
+        if (clientSecret != null) {
+            response.setMetadata(Map.of("clientSecret", clientSecret));
         }
 
         return response;
@@ -114,7 +98,6 @@ public class OrderService {
             throw new BusinessLogicException("Order is not in pending status");
         }
 
-        // Verify the payment with Stripe
         try {
             boolean paymentSuccessful = stripeService.verifyPayment(stripePaymentIntentId);
             if (!paymentSuccessful) {
@@ -128,12 +111,9 @@ public class OrderService {
         order.setStatus(OrderStatus.PAID);
         order.setPaidAt(LocalDateTime.now());
 
-        // Update order items and products
         order.getOrderItems().forEach(item -> {
             if (item.getStatus() == OrderItemStatus.PENDING) {
                 item.setStatus(OrderItemStatus.PROCESSING);
-
-                // Mark product as sold
                 Product product = item.getProduct();
                 product.setStatus(ProductStatus.SOLD);
                 product.setSoldAt(LocalDateTime.now());
@@ -178,38 +158,52 @@ public class OrderService {
 
     @Transactional
     public OrderDetailResponse cancelOrder(Long orderId, String reason, Long userId) {
-        log.info("Cancelling order: orderId={}, userId={}, reason={}", orderId, userId, reason);
+        log.info("Attempting to cancel order: orderId={}, userId={}, reason={}", orderId, userId, reason);
 
         Order order = getOrderWithValidation(orderId, userId, false);
 
-        // Check if order can be cancelled
         boolean hasNonCancellableItems = order.getOrderItems().stream()
                 .anyMatch(item -> !isItemCancellable(item.getStatus()));
 
         if (hasNonCancellableItems) {
-            throw new BusinessLogicException("Cannot cancel order with shipped or delivered items");
+            throw new BusinessLogicException("Cannot cancel order with shipped or delivered items.");
         }
 
-        // Cancel all items
+        String paymentIntentId = order.getOrderItems().stream()
+                .map(item -> getTransactionForOrderItem(item.getOrderItemId()))
+                .map(Transaction::getStripePaymentIntentId)
+                .filter(Objects::nonNull)
+                .findFirst()
+                .orElse(null);
+
+        if (paymentIntentId != null) {
+            try {
+                BigDecimal totalRefundAmount = order.getOrderItems().stream()
+                        .filter(item -> isItemCancellable(item.getStatus()))
+                        .map(OrderItem::getPrice)
+                        .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+                if (totalRefundAmount.compareTo(BigDecimal.ZERO) > 0) {
+                    log.info("Refunding {} for paymentIntentId {}", totalRefundAmount, paymentIntentId);
+                    stripeService.refundPayment(paymentIntentId, totalRefundAmount);
+                }
+
+            } catch (Exception e) {
+                log.error("Stripe refund failed for order {}: {}. Cancellation process aborted.", orderId, e.getMessage());
+                throw new BusinessLogicException("Refund failed. Please try again or contact support. " + e.getMessage());
+            }
+        }
+
+
         order.getOrderItems().forEach(item -> {
             if (isItemCancellable(item.getStatus())) {
                 item.setStatus(OrderItemStatus.CANCELLED);
                 item.setEscrowStatus(EscrowStatus.REFUNDED);
 
-                // Process refund through Stripe if payment was made
                 Transaction transaction = getTransactionForOrderItem(item.getOrderItemId());
-                if (transaction.getStripePaymentIntentId() != null &&
-                        TransactionStatus.PAID.equals(transaction.getStatus())) {
-                    try {
-                        stripeService.refundPayment(transaction.getStripePaymentIntentId(), item.getPrice());
-                    } catch (Exception e) {
-                        log.error("Failed to process refund for transaction {}: {}",
-                                transaction.getTransactionId(), e.getMessage());
-                        // Continue with cancellation even if refund fails
-                    }
-                }
+                transaction.setStatus(TransactionStatus.CANCELLED);
+                transactionRepository.save(transaction);
 
-                // Restore product status
                 Product product = item.getProduct();
                 if (product.getStatus() == ProductStatus.SOLD || product.getStatus() == ProductStatus.PENDING_PAYMENT) {
                     product.setStatus(ProductStatus.ACTIVE);
@@ -220,8 +214,9 @@ public class OrderService {
         });
 
         order.setStatus(OrderStatus.CANCELLED);
-        order = orderRepository.save(order);
+        orderRepository.save(order);
 
+        log.info("Order {} cancelled successfully.", orderId);
         return convertToDetailResponse(order);
     }
 
@@ -337,7 +332,7 @@ public class OrderService {
                 .collect(Collectors.toList());
     }
 
-    private void createTransactions(List<OrderItem> orderItems, User buyer, UserAddress shippingAddress) {
+    private void createTransactions(List<OrderItem> orderItems, User buyer, UserAddress shippingAddress, String paymentIntentId) {
         for (OrderItem orderItem : orderItems) {
             Transaction transaction = Transaction.builder()
                     .orderItem(orderItem)
@@ -349,6 +344,7 @@ public class OrderService {
                     .shippingAddress(shippingAddress)
                     .status(TransactionStatus.PENDING)
                     .escrowStatus(EscrowStatus.HOLDING)
+                    .stripePaymentIntentId(paymentIntentId)
                     .build();
             transactionRepository.save(transaction);
         }
@@ -389,7 +385,6 @@ public class OrderService {
     public void processScheduledTransfers() {
         LocalDateTime sevenDaysAgo = LocalDateTime.now().minusDays(7);
 
-        // Tìm tất cả transactions đã delivered 7 ngày nhưng chưa transfer
         List<Transaction> readyTransactions = transactionRepository
                 .findByStatusAndDeliveredAtBeforeAndEscrowStatus(
                         TransactionStatus.DELIVERED,
@@ -397,19 +392,27 @@ public class OrderService {
                         EscrowStatus.RELEASED
                 );
 
+        if (!readyTransactions.isEmpty()) {
+            log.info("Found {} transactions ready for seller payout.", readyTransactions.size());
+        }
+
         for (Transaction transaction : readyTransactions) {
             try {
                 OrderItem orderItem = transaction.getOrderItem();
+                log.info("Attempting to release payment for transaction {}.", transaction.getTransactionId());
                 stripeService.releasePaymentToSeller(orderItem, transaction);
 
                 transaction.setEscrowStatus(EscrowStatus.TRANSFERRED);
                 transactionRepository.save(transaction);
 
-                log.info("Released payment for transaction {} after 7 days",
-                        transaction.getTransactionId());
+                log.info("Successfully released payment for transaction {}", transaction.getTransactionId());
             } catch (Exception e) {
-                log.error("Failed to release payment for transaction {}: {}",
+                log.error("Failed to release payment for transaction {}: {}. Marking as TRANSFER_FAILED.",
                         transaction.getTransactionId(), e.getMessage());
+
+                transaction.setEscrowStatus(EscrowStatus.TRANSFER_FAILED);
+                transactionRepository.save(transaction);
+
             }
         }
     }
@@ -566,6 +569,122 @@ public class OrderService {
         }
 
         return order;
+    }
+
+    @Transactional
+    public void handleSuccessfulPayment(String paymentIntentId) {
+        log.info("Handling successful payment for PaymentIntent: {}", paymentIntentId);
+
+        Transaction transaction = transactionRepository.findFirstByStripePaymentIntentId(paymentIntentId)
+                .orElse(null);
+
+        if (transaction == null) {
+            log.warn("Received payment_intent.succeeded webhook for a transaction not found in DB. PI: {}", paymentIntentId);
+            return;
+        }
+
+        Order order = transaction.getOrderItem().getOrder();
+        if (!order.getStatus().equals(OrderStatus.PENDING)) {
+            log.info("Order {} has already been processed. Skipping update.", order.getOrderId());
+            return;
+        }
+
+        log.info("Updating order {} to PAID.", order.getOrderId());
+        order.setStatus(OrderStatus.PAID);
+        order.setPaidAt(LocalDateTime.now());
+
+        order.getOrderItems().forEach(item -> {
+            item.setStatus(OrderItemStatus.PROCESSING);
+            Product product = item.getProduct();
+            product.setStatus(ProductStatus.SOLD);
+            product.setSoldAt(LocalDateTime.now());
+            productRepository.save(product);
+        });
+
+        orderRepository.save(order);
+        log.info("Order {} successfully updated after payment.", order.getOrderId());
+    }
+
+    @Transactional
+    public void handleChargeDisputeCreated(Dispute dispute) {
+        String paymentIntentId = dispute.getPaymentIntent();
+        log.warn("Dispute created for PaymentIntent {}. Reason: {}", paymentIntentId, dispute.getReason());
+
+        transactionRepository.findFirstByStripePaymentIntentId(paymentIntentId).ifPresent(transaction -> {
+            transaction.setDisputeStatus(DisputeStatus.OPEN);
+            transaction.setDisputeReason(dispute.getReason());
+            transactionRepository.save(transaction);
+            log.info("Transaction {} marked as DISPUTED.", transaction.getTransactionId());
+            // (Optional) Gửi email/thông báo cho admin
+        });
+    }
+
+    @Transactional
+    public void handleTransferFailed(Transfer transfer) {
+        // Lấy transactionId từ metadata mà chúng ta đã lưu khi tạo transfer
+        String transactionId = transfer.getMetadata().get("transaction_id");
+        log.error("Transfer {} failed for transactionId {}.", transfer.getId(), transactionId);
+
+        if (transactionId != null) {
+            transactionRepository.findById(Long.parseLong(transactionId)).ifPresent(transaction -> {
+                transaction.setEscrowStatus(EscrowStatus.TRANSFER_FAILED);
+                transactionRepository.save(transaction);
+                log.info("Transaction {} marked as TRANSFER_FAILED.", transaction.getTransactionId());
+            });
+        }
+    }
+
+    @Transactional
+    public void handleTransferCreated(Transfer transfer) {
+        String transactionId = transfer.getMetadata().get("transaction_id");
+        log.info("Transfer {} created for transactionId {}.", transfer.getId(), transactionId);
+
+        if (transactionId != null) {
+            transactionRepository.findById(Long.parseLong(transactionId)).ifPresent(transaction -> {
+                transaction.setStripeTransferId(transfer.getId()); // Lưu lại mã transfer
+                transactionRepository.save(transaction);
+            });
+        }
+    }
+
+    @Scheduled(cron = "0 0 * * * ?")
+    @Transactional
+    public void reconcilePendingOrders() {
+        log.info("Starting pending orders reconciliation job...");
+
+        LocalDateTime oneHourAgo = LocalDateTime.now().minusHours(1);
+        List<Order> potentiallyStuckOrders = orderRepository.findByStatusAndCreatedAtBefore(OrderStatus.PENDING, oneHourAgo);
+
+        if (potentiallyStuckOrders.isEmpty()) {
+            log.info("Reconciliation job finished. No stuck orders found.");
+            return;
+        }
+
+        log.warn("Found {} potentially stuck orders. Starting verification with Stripe.", potentiallyStuckOrders.size());
+
+        for (Order order : potentiallyStuckOrders) {
+            if (order.getPaymentMethod() != PaymentMethod.STRIPE_CARD) {
+                continue;
+            }
+
+            String paymentIntentId = order.getOrderItems().stream()
+                    .map(item -> getTransactionForOrderItem(item.getOrderItemId()).getStripePaymentIntentId())
+                    .filter(Objects::nonNull)
+                    .findFirst()
+                    .orElse(null);
+
+            if (paymentIntentId != null) {
+                try {
+                    if (stripeService.verifyPayment(paymentIntentId)) {
+                        log.warn("Reconciliation: Order {} was paid on Stripe but stuck in PENDING. Updating status now.", order.getOrderId());
+                        handleSuccessfulPayment(paymentIntentId);
+                    }
+                } catch (Exception e) {
+                    log.error("Error during reconciliation check for order {}: {}", order.getOrderId(), e.getMessage());
+                }
+            }
+        }
+        log.info("Reconciliation job finished.");
     }
 
     // Conversion methods

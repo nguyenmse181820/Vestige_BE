@@ -1,7 +1,9 @@
 package se.vestige_be.service;
 
+import com.stripe.model.Account;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
@@ -30,6 +32,7 @@ import java.util.List;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class UserService {
 
     private final UserRepository userRepository;
@@ -156,6 +159,35 @@ public class UserService {
                 .build();
 
         return userRepository.save(user);
+    }
+
+    @Transactional
+    public void handleStripeAccountUpdate(Account account) {
+        userRepository.findByStripeAccountId(account.getId()).ifPresent(user -> {
+            log.info("Updating user {} based on Stripe account update from webhook.", user.getUsername());
+
+            boolean isVerified = Boolean.TRUE.equals(account.getChargesEnabled()) && Boolean.TRUE.equals(account.getPayoutsEnabled());
+            user.setIsVerified(isVerified);
+
+            String disabledReason = null;
+            if (account.getRequirements() != null) {
+                disabledReason = account.getRequirements().getDisabledReason();
+            }
+
+            if (disabledReason != null) {
+                user.setAccountStatus("restricted");
+                log.warn("Stripe account for user {} has been restricted. Reason: {}", user.getUsername(), disabledReason);
+            } else if (isVerified) {
+                user.setAccountStatus("active");
+            } else {
+                // Nếu không được xác minh và cũng không có lý do vô hiệu hóa rõ ràng
+                // có thể tài khoản đang ở trạng thái 'pending' hoặc 'incomplete'
+                user.setAccountStatus("pending_verification");
+            }
+            userRepository.save(user);
+            log.info("User {} verification status set to: {}. Account status set to: {}",
+                    user.getUsername(), isVerified, user.getAccountStatus());
+        });
     }
 
     @Transactional
