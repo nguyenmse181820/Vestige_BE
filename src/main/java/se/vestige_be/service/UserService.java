@@ -46,6 +46,11 @@ public class UserService {
                 .orElseThrow(() -> new RuntimeException("User not found with username: " + username));
     }
 
+    @Transactional
+    public User save(User user) {
+        return userRepository.save(user);
+    }
+
     public User findById(Long userId) {
         return userRepository.findById(userId)
                 .orElseThrow(() -> new EntityNotFoundException("User not found with userId: " + userId));

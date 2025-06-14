@@ -36,7 +36,7 @@ public class OrderController {
         User user = userService.findByUsername(userDetails.getUsername());
 
         try {
-            OrderDetailResponse order = orderService.createMultiProductOrder(request, user.getUserId());
+            OrderDetailResponse order = orderService.createOrder(request, user.getUserId());
             return ResponseEntity.status(HttpStatus.CREATED)
                     .body(ApiResponse.<OrderDetailResponse>builder()
                             .message("Order created successfully")
@@ -95,19 +95,19 @@ public class OrderController {
         }
     }
 
-    @PatchMapping("/{orderId}/status")
+    @PostMapping("/{orderId}/confirm-payment")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<OrderDetailResponse>> updateOrderStatus(
+    public ResponseEntity<ApiResponse<OrderDetailResponse>> confirmPayment(
             @PathVariable Long orderId,
-            @Valid @RequestBody OrderStatusUpdateRequest request,
+            @RequestBody(required = false) String stripePaymentIntentId,
             @AuthenticationPrincipal UserDetails userDetails) {
 
         User user = userService.findByUsername(userDetails.getUsername());
 
         try {
-            OrderDetailResponse order = orderService.updateOrderStatus(orderId, request, user.getUserId());
+            OrderDetailResponse order = orderService.confirmPayment(orderId, user.getUserId(), stripePaymentIntentId);
             return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
-                    .message("Order status updated successfully")
+                    .message("Payment confirmed successfully")
                     .data(order)
                     .build());
         } catch (RuntimeException e) {
@@ -142,28 +142,6 @@ public class OrderController {
         }
     }
 
-    @PostMapping("/{orderId}/confirm-payment")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<OrderDetailResponse>> confirmPayment(
-            @PathVariable Long orderId,
-            @AuthenticationPrincipal UserDetails userDetails) {
-
-        User user = userService.findByUsername(userDetails.getUsername());
-
-        try {
-            OrderDetailResponse order = orderService.confirmPayment(orderId, user.getUserId());
-            return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
-                    .message("Payment confirmed successfully")
-                    .data(order)
-                    .build());
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ApiResponse.<OrderDetailResponse>builder()
-                            .message(e.getMessage())
-                            .build());
-        }
-    }
-
     @PostMapping("/{orderId}/items/{itemId}/ship")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<ApiResponse<OrderDetailResponse>> shipOrderItem(
@@ -175,7 +153,9 @@ public class OrderController {
         User user = userService.findByUsername(userDetails.getUsername());
 
         try {
-            OrderDetailResponse order = orderService.shipOrderItem(orderId, itemId, request, user.getUserId());
+            // Set status to SHIPPED in the request
+            request.setStatus("SHIPPED");
+            OrderDetailResponse order = orderService.updateOrderItemStatus(orderId, itemId, request, user.getUserId());
             return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
                     .message("Item shipped successfully")
                     .data(order)
@@ -199,7 +179,13 @@ public class OrderController {
         User user = userService.findByUsername(userDetails.getUsername());
 
         try {
-            OrderDetailResponse order = orderService.confirmItemDelivery(orderId, itemId, notes, user.getUserId());
+            // Create request with DELIVERED status
+            OrderStatusUpdateRequest request = OrderStatusUpdateRequest.builder()
+                    .status("DELIVERED")
+                    .notes(notes)
+                    .build();
+
+            OrderDetailResponse order = orderService.updateOrderItemStatus(orderId, itemId, request, user.getUserId());
             return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
                     .message("Item delivery confirmed successfully")
                     .data(order)
@@ -246,7 +232,12 @@ public class OrderController {
         User user = userService.findByUsername(userDetails.getUsername());
 
         try {
-            OrderDetailResponse order = orderService.cancelOrderItem(orderId, itemId, reason, user.getUserId());
+            OrderStatusUpdateRequest request = OrderStatusUpdateRequest.builder()
+                    .status("CANCELLED")
+                    .notes(reason)
+                    .build();
+
+            OrderDetailResponse order = orderService.updateOrderItemStatus(orderId, itemId, request, user.getUserId());
             return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
                     .message("Order item cancelled successfully")
                     .data(order)
@@ -259,23 +250,72 @@ public class OrderController {
         }
     }
 
-    @GetMapping("/{orderId}/sellers")
+    @GetMapping("/{orderId}/tracking")
     @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<OrderSellersResponse>> getOrderSellers(
+    public ResponseEntity<ApiResponse<Object>> getOrderTracking(
             @PathVariable Long orderId,
             @AuthenticationPrincipal UserDetails userDetails) {
 
         User user = userService.findByUsername(userDetails.getUsername());
 
         try {
-            OrderSellersResponse sellers = orderService.getOrderSellers(orderId, user.getUserId());
-            return ResponseEntity.ok(ApiResponse.<OrderSellersResponse>builder()
-                    .message("Order sellers retrieved successfully")
-                    .data(sellers)
+            OrderDetailResponse order = orderService.getOrderById(orderId, user.getUserId());
+
+            // Extract tracking information from order items
+            Object trackingInfo = order.getOrderItems().stream()
+                    .filter(item -> item.getTransaction() != null &&
+                            item.getTransaction().getTrackingNumber() != null)
+                    .map(item -> {
+                        var transaction = item.getTransaction();
+                        return java.util.Map.of(
+                                "itemId", item.getOrderItemId(),
+                                "productTitle", item.getProduct().getTitle(),
+                                "trackingNumber", transaction.getTrackingNumber(),
+                                "trackingUrl", transaction.getTrackingUrl() != null ?
+                                        transaction.getTrackingUrl() : "",
+                                "status", item.getStatus(),
+                                "shippedAt", transaction.getShippedAt(),
+                                "deliveredAt", transaction.getDeliveredAt()
+                        );
+                    })
+                    .toList();
+
+            return ResponseEntity.ok(ApiResponse.builder()
+                    .message("Order tracking retrieved successfully")
+                    .data(trackingInfo)
                     .build());
         } catch (RuntimeException e) {
             return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(ApiResponse.<OrderSellersResponse>builder()
+                    .body(ApiResponse.builder()
+                            .message(e.getMessage())
+                            .build());
+        }
+    }
+
+    @GetMapping("/stats")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<Object>> getUserOrderStats(
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        User user = userService.findByUsername(userDetails.getUsername());
+
+        try {
+            Object stats = java.util.Map.of(
+                    "totalOrders", 0,
+                    "activeOrders", 0,
+                    "completedOrders", 0,
+                    "cancelledOrders", 0,
+                    "totalSpent", 0,
+                    "totalEarned", 0
+            );
+
+            return ResponseEntity.ok(ApiResponse.builder()
+                    .message("Order statistics retrieved successfully")
+                    .data(stats)
+                    .build());
+        } catch (RuntimeException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.builder()
                             .message(e.getMessage())
                             .build());
         }
