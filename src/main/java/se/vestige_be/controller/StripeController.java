@@ -61,11 +61,9 @@ public class StripeController {
                                 "setupComplete", "true"
                         ))
                         .build());
-            }
-
-            // Create onboarding link
-            String refreshUrl = frontendUrl + "/stripe/refresh";
-            String returnUrl = frontendUrl + "/stripe/return";
+            }            // Create onboarding link
+            String refreshUrl = frontendUrl + "/profile";
+            String returnUrl = frontendUrl + "/profile";
             AccountLink accountLink = stripeService.createAccountLink(
                     user.getStripeAccountId(), refreshUrl, returnUrl);
 
@@ -176,9 +174,7 @@ public class StripeController {
                             .message("Error retrieving balance: " + e.getMessage())
                             .build());
         }
-    }
-
-    @PostMapping("/webhook")
+    }    @PostMapping("/webhook")
     public ResponseEntity<String> handleWebhook(
             @RequestBody String payload,
             @RequestHeader(value = "Stripe-Signature", required = false) String sigHeader) {
@@ -196,9 +192,17 @@ public class StripeController {
 
             log.info("Successfully processed webhook: {}", event.getType());
             return ResponseEntity.ok("OK");
+            
+        } catch (IllegalArgumentException e) {
+            // Webhook validation failed - should return 400 to avoid retries
+            log.error("Webhook validation failed: {}", e.getMessage());
+            return ResponseEntity.badRequest().body("Invalid webhook signature");
+            
         } catch (Exception e) {
-            log.error("Webhook error: {}", e.getMessage(), e);
-            return ResponseEntity.ok("Error logged"); // Return 200 to prevent retries
+            // Processing error - return 500 so Stripe retries
+            log.error("Webhook processing error: {}", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body("Processing failed - will retry");
         }
     }
 }

@@ -6,7 +6,6 @@ import com.stripe.model.*;
 import com.stripe.net.Webhook;
 import com.stripe.param.*;
 import jakarta.annotation.PostConstruct;
-import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
@@ -19,6 +18,8 @@ import se.vestige_be.pojo.User;
 import java.math.BigDecimal;
 import java.util.HashMap;
 import java.util.Map;
+import java.util.Set;
+import java.util.concurrent.ConcurrentHashMap;
 
 @Service
 @Slf4j
@@ -32,6 +33,10 @@ public class StripeService {
 
     private final OrderService orderService;
     private final UserService userService;
+    
+    // Simple in-memory storage for processed webhook events
+    // In production, this should be stored in database
+    private final Set<String> processedEventIds = ConcurrentHashMap.newKeySet();
 
     public StripeService(@Lazy OrderService orderService, @Lazy UserService userService) {
         this.orderService = orderService;
@@ -42,33 +47,36 @@ public class StripeService {
     public void init() {
         Stripe.apiKey = secretKey;
         log.info("Stripe initialized with currency: {}", currency);
-    }
-
-    /**
-     * Creates a Stripe Express account for seller onboarding
+    }    /**
+     * Creates a Stripe Express account for seller onboarding - VIETNAM COMPATIBLE
+     * 
+     * Note: Vietnam accounts only support 'transfers' capability (not card_payments).
+     * This means sellers can receive payouts but cannot directly charge customers.
+     * Payment processing happens through the platform account with cross-border transfers.
      */
     public Account createExpressAccount(User user) throws StripeException {
         try {
             AccountCreateParams params = AccountCreateParams.builder()
                     .setType(AccountCreateParams.Type.EXPRESS)
+                    .setCountry("VN") // Vietnam - supports transfers only
                     .setEmail(user.getEmail())
-                    .setBusinessType(AccountCreateParams.BusinessType.INDIVIDUAL)
-                    .setBusinessProfile(
+                    .setBusinessType(AccountCreateParams.BusinessType.INDIVIDUAL)                    .setBusinessProfile(
                             AccountCreateParams.BusinessProfile.builder()
                                     .setName(user.getFirstName() + " " + user.getLastName())
+                                    .setMcc("5734") // Merchant Category Code for second-hand goods
+                                    .setProductDescription("Vestige Marketplace - Second-hand goods")
+                                    .setUrl("https://vestige-marketplace.com") // Add your marketplace URL
                                     .build()
                     )
-                    .setCapabilities(
-                            AccountCreateParams.Capabilities.builder()
-                                    .setTransfers(
-                                            AccountCreateParams.Capabilities.Transfers.builder()
-                                                    .setRequested(true)
-                                                    .build()
-                                    )
+                    .setCapabilities(buildCapabilitiesForCountry("VN"))
+                    .setTosAcceptance(
+                            AccountCreateParams.TosAcceptance.builder()
+                                    .setServiceAgreement(getServiceAgreementForCountry("VN"))
                                     .build()
                     )
                     .putMetadata("user_id", user.getUserId().toString())
                     .putMetadata("username", user.getUsername())
+                    .putMetadata("platform", "vestige")
                     .build();
 
             Account account = Account.create(params);
@@ -148,13 +156,79 @@ public class StripeService {
     }
 
     /**
-     * Verifies that a payment was successful
+     * Enhanced payment verification with amount and order validation
+     */    public boolean verifyPaymentForOrder(String paymentIntentId, BigDecimal expectedAmount, Long orderId) throws StripeException {
+        try {
+            PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
+            
+            // Check payment status with detailed logging
+            String status = paymentIntent.getStatus();
+            log.info("PaymentIntent {} status: {}", paymentIntentId, status);
+            
+            if (!"succeeded".equals(status)) {
+                // Provide specific error messages based on status
+                switch (status) {
+                    case "requires_payment_method":
+                        log.warn("Payment {} requires payment method - frontend needs to confirm payment with Stripe Elements", paymentIntentId);
+                        break;
+                    case "requires_confirmation":
+                        log.warn("Payment {} requires confirmation - frontend needs to confirm payment", paymentIntentId);
+                        break;
+                    case "requires_action":
+                        log.warn("Payment {} requires additional action (3D Secure, etc.)", paymentIntentId);
+                        break;
+                    case "processing":
+                        log.warn("Payment {} is still processing", paymentIntentId);
+                        break;
+                    case "canceled":
+                        log.warn("Payment {} was canceled", paymentIntentId);
+                        break;
+                    case "requires_capture":
+                        log.warn("Payment {} requires manual capture", paymentIntentId);
+                        break;
+                    default:
+                        log.warn("Payment {} has unexpected status: {}", paymentIntentId, status);
+                }
+                return false;
+            }
+            
+            // Validate amount matches (convert to minor currency unit)
+            long expectedAmountMinor = expectedAmount.longValue();
+            if (!paymentIntent.getAmount().equals(expectedAmountMinor)) {
+                log.error("Amount mismatch for PI {}: expected={}, actual={}", 
+                    paymentIntentId, expectedAmountMinor, paymentIntent.getAmount());
+                return false;
+            }
+            
+            // Validate order metadata
+            String orderIdMetadata = paymentIntent.getMetadata().get("order_id");
+            if (orderIdMetadata == null || !orderId.toString().equals(orderIdMetadata)) {
+                log.error("Order ID mismatch for PI {}: expected={}, metadata={}", 
+                    paymentIntentId, orderId, orderIdMetadata);
+                return false;
+            }
+            
+            log.info("Payment verification successful for PI {} order {} amount {}", 
+                paymentIntentId, orderId, expectedAmount);
+            return true;
+            
+        } catch (StripeException e) {
+            log.error("Failed to verify payment {}: {}", paymentIntentId, e.getMessage());
+            throw e;
+        }
+    }    /**
+     * Verifies that a payment was successful - DEPRECATED, use verifyPaymentForOrder instead
      */
+    @Deprecated
     public boolean verifyPayment(String paymentIntentId) throws StripeException {
         try {
             PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
-            boolean succeeded = "succeeded".equals(paymentIntent.getStatus());
-            log.info("Payment verification for {}: {}", paymentIntentId, succeeded ? "SUCCESS" : "FAILED");
+            String status = paymentIntent.getStatus();
+            boolean succeeded = "succeeded".equals(status);
+            
+            log.info("Payment verification for {}: {} (Status: {})", 
+                paymentIntentId, succeeded ? "SUCCESS" : "FAILED", status);
+            
             return succeeded;
         } catch (StripeException e) {
             log.error("Failed to verify payment {}: {}", paymentIntentId, e.getMessage());
@@ -334,30 +408,34 @@ public class StripeService {
             log.error("Failed to retrieve transfer {}: {}", transferId, e.getMessage());
             throw e;
         }
-    }
-
-    /**
+    }    /**
      * Validates webhook signatures for security
      */
     public Event validateWebhook(String payload, String sigHeader, String endpointSecret) {
         try {
             Event event = Webhook.constructEvent(payload, sigHeader, endpointSecret);
-            log.info("Validated webhook event: {}", event.getType());
+            log.info("Validated webhook event: {} (ID: {})", event.getType(), event.getId());
             return event;
         } catch (Exception e) {
             log.error("Webhook validation failed: {}", e.getMessage());
-            throw new BusinessLogicException("Invalid webhook signature");
+            throw new IllegalArgumentException("Invalid webhook signature: " + e.getMessage());
         }
-    }
-
-    /**
-     * Handles webhook events for automated processing
+    }    /**
+     * Handles webhook events for automated processing with idempotency
      */
     public void processWebhookEvent(Event event) {
+        String eventId = event.getId();
+        
+        // Check if event was already processed (idempotency)
+        if (processedEventIds.contains(eventId)) {
+            log.info("Event {} already processed, skipping", eventId);
+            return;
+        }
+        
         StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
 
         if (stripeObject == null) {
-            log.error("Stripe object not found in webhook event data. Event ID: {}", event.getId());
+            log.error("Stripe object not found in webhook event data. Event ID: {}", eventId);
             return;
         }
 
@@ -401,13 +479,18 @@ public class StripeService {
                         log.info("Payout {} of {} {} created for seller. Destination: {}",
                                 payout.getId(), payout.getAmount(), payout.getCurrency().toUpperCase(), payout.getDestination());
                     }
-                    break;
-
-                default:
-                    log.debug("Unhandled webhook event: {} - Event ID: {}", event.getType(), event.getId());
+                    break;                default:
+                    log.debug("Unhandled webhook event: {} - Event ID: {}", event.getType(), eventId);
             }
+            
+            // Mark event as processed after successful handling
+            processedEventIds.add(eventId);
+            log.debug("Marked event {} as processed", eventId);
+            
         } catch (Exception e) {
-            log.error("Error processing webhook event {} (ID: {}): {}", event.getType(), event.getId(), e.getMessage(), e);
+            log.error("Error processing webhook event {} (ID: {}): {}", event.getType(), eventId, e.getMessage(), e);
+            // Don't mark as processed if there was an error, allow retry
+            throw e;
         }
     }
 
@@ -446,5 +529,80 @@ public class StripeService {
             log.error("Failed to get platform fee stats: {}", e.getMessage());
             throw e;
         }
+    }
+
+    /**
+     * Get the current status of a PaymentIntent for debugging/monitoring
+     */
+    public String getPaymentIntentStatus(String paymentIntentId) throws StripeException {
+        try {
+            PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
+            log.info("PaymentIntent {} current status: {}, last_payment_error: {}", 
+                paymentIntentId, paymentIntent.getStatus(), 
+                paymentIntent.getLastPaymentError() != null ? paymentIntent.getLastPaymentError().getMessage() : "none");
+            return paymentIntent.getStatus();
+        } catch (StripeException e) {
+            log.error("Failed to retrieve PaymentIntent {}: {}", paymentIntentId, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Gets detailed payment status for a PaymentIntent
+     */
+    public String getPaymentStatus(String paymentIntentId) throws StripeException {
+        try {
+            PaymentIntent paymentIntent = PaymentIntent.retrieve(paymentIntentId);
+            return paymentIntent.getStatus();
+        } catch (StripeException e) {
+            log.error("Failed to get payment status for {}: {}", paymentIntentId, e.getMessage());
+            throw e;
+        }
+    }
+
+    /**
+     * Determines the appropriate capabilities for a Stripe account based on country
+     * Vietnam: Only supports transfers
+     * Other countries: May support both card_payments and transfers
+     */
+    private AccountCreateParams.Capabilities buildCapabilitiesForCountry(String country) {
+        AccountCreateParams.Capabilities.Builder capabilitiesBuilder = 
+                AccountCreateParams.Capabilities.builder();
+        
+        // Vietnam only supports transfers capability
+        if ("VN".equals(country)) {
+            capabilitiesBuilder.setTransfers(
+                    AccountCreateParams.Capabilities.Transfers.builder()
+                            .setRequested(true)
+                            .build()
+            );
+        } else {
+            // Other countries may support both capabilities
+            capabilitiesBuilder
+                    .setCardPayments(
+                            AccountCreateParams.Capabilities.CardPayments.builder()
+                                    .setRequested(true)
+                                    .build()
+                    )
+                    .setTransfers(
+                            AccountCreateParams.Capabilities.Transfers.builder()
+                                    .setRequested(true)
+                                    .build()
+                    );
+        }
+        
+        return capabilitiesBuilder.build();
+    }
+
+    /**
+     * Determines the appropriate service agreement based on capabilities
+     */
+    private String getServiceAgreementForCountry(String country) {
+        // Vietnam uses recipient agreement (transfers only)
+        if ("VN".equals(country)) {
+            return "recipient";
+        }
+        // Other countries use full agreement (card payments + transfers)
+        return "full";
     }
 }

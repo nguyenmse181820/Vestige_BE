@@ -1,4 +1,4 @@
-package se.vestige_be.pojo.chat;
+package se.vestige_be.pojo;
 
 import jakarta.persistence.*;
 import lombok.*;

@@ -26,10 +26,10 @@ public class OrderDetailResponse {
     private String notes;
     private Integer totalItems;
     private Integer uniqueSellers;
-    private LocalDateTime createdAt;
-    private LocalDateTime paidAt;
+    private LocalDateTime createdAt;    private LocalDateTime paidAt;
     private LocalDateTime shippedAt;
     private LocalDateTime deliveredAt;
+    private String stripePaymentIntentId;
 
     private List<OrderItemDetail> orderItems;
     private ShippingAddressInfo shippingAddress;

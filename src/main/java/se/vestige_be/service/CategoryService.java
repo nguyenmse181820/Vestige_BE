@@ -15,26 +15,26 @@ import java.util.Optional;
 @Service
 @AllArgsConstructor
 public class CategoryService {
-    private final CategoryRepository categoryRepository;
-
-    public List<CategoryResponse> findAll() {
+    private final CategoryRepository categoryRepository;    public List<CategoryResponse> findAll() {
         List<Category> categories = categoryRepository.findByParentCategoryIsNull();
         return CategoryResponse.fromEntityList(categories);
     }
 
     public Optional<Category> findById(Long id) {
+        return categoryRepository.findByIdWithSubcategories(id);
+    }
+
+    public Optional<Category> findByIdBasic(Long id) {
         return categoryRepository.findById(id);
     }
 
     public List<Category> findByParentCategory(Long parentCategoryId) {
         return categoryRepository.findByParentCategory_CategoryId(parentCategoryId);
-    }
-
-    @Transactional
-    public Category createCategory(String name, String description, Long parentCategoryId) {
+    }    @Transactional
+    public CategoryResponse createCategory(String name, String description, Long parentCategoryId) {
         Category parentCategory = null;
         if(parentCategoryId != null) {
-            parentCategory = findById(parentCategoryId).orElseThrow(() -> new EntityNotFoundException("Parent category not found with id: " + parentCategoryId));
+            parentCategory = findByIdBasic(parentCategoryId).orElseThrow(() -> new EntityNotFoundException("Parent category not found with id: " + parentCategoryId));
         }
         if (categoryRepository.existsByName(name)) {
             throw new RuntimeException("Category with name '" + name + "' already exists");
@@ -45,12 +45,20 @@ public class CategoryService {
                 .parentCategory(parentCategory)
                 .createdAt(LocalDateTime.now())
                 .build();
-        return categoryRepository.save(category);
-    }
-
-    @Transactional
-    public Category updateCategory(Long id, String name, String description, Long parentCategoryId) {
-        Category existingCategory = findById(id)
+        
+        Category savedCategory = categoryRepository.save(category);
+        
+        // Reload the saved category with parent data to avoid lazy loading issues
+        if (savedCategory.getCategoryId() != null) {
+            savedCategory = categoryRepository.findByIdWithParent(savedCategory.getCategoryId())
+                    .orElse(savedCategory);
+        }
+        
+        // Convert to response to avoid lazy loading issues
+        return CategoryResponse.fromEntity(savedCategory, 0);
+    }    @Transactional
+    public CategoryResponse updateCategory(Long id, String name, String description, Long parentCategoryId) {
+        Category existingCategory = findByIdBasic(id)
                 .orElseThrow(() -> new EntityNotFoundException("Category with id '" + id + "' not found"));
 
         if(name != null) {
@@ -65,7 +73,7 @@ public class CategoryService {
         }
 
         if(parentCategoryId != null) {
-            Category parentCategory = findById(parentCategoryId)
+            Category parentCategory = findByIdBasic(parentCategoryId)
                     .orElseThrow(() -> new EntityNotFoundException("Parent category with id '" + parentCategoryId + "' not found"));
             if (isCircularReference(id, parentCategoryId)) {
                 throw new RuntimeException("Cannot set parent category: would create circular reference");
@@ -73,12 +81,19 @@ public class CategoryService {
             existingCategory.setParentCategory(parentCategory);
         }
 
-        return categoryRepository.save(existingCategory);
-    }
-
-    @Transactional
+        Category savedCategory = categoryRepository.save(existingCategory);
+        
+        // Reload the saved category with parent data to avoid lazy loading issues
+        if (savedCategory.getCategoryId() != null) {
+            savedCategory = categoryRepository.findByIdWithParent(savedCategory.getCategoryId())
+                    .orElse(savedCategory);
+        }
+        
+        // Convert to response to avoid lazy loading issues
+        return CategoryResponse.fromEntity(savedCategory, 0);
+    }@Transactional
     public void deleteCategory(Long categoryId) {
-        Category category = findById(categoryId)
+        Category category = findByIdWithProducts(categoryId)
                 .orElseThrow(() -> new EntityNotFoundException("Category with id '" + categoryId + "' not found"));
 
         List<Category> subcategories = findByParentCategory(categoryId);
@@ -93,19 +108,28 @@ public class CategoryService {
         }
 
         categoryRepository.deleteById(categoryId);
+    }    @Transactional(readOnly = true)
+    public Optional<Category> findByIdWithProducts(Long id) {
+        return categoryRepository.findByIdWithSubcategories(id);
     }
 
-    private boolean isCircularReference(Long categoryId, Long parentCategoryId) {
+    @Transactional(readOnly = true)
+    public CategoryResponse getCategoryById(Long id) {
+        Category category = findById(id)
+                .orElseThrow(() -> new EntityNotFoundException("Category with id '" + id + "' not found"));
+        return CategoryResponse.fromEntity(category, 0);
+    }    private boolean isCircularReference(Long categoryId, Long parentCategoryId) {
         if (categoryId.equals(parentCategoryId)) {
             return true;
         }
 
-        Category parent = findById(parentCategoryId).orElse(null);
+        Category parent = categoryRepository.findByIdWithParent(parentCategoryId).orElse(null);
         while (parent != null && parent.getParentCategory() != null) {
             if (parent.getParentCategory().getCategoryId().equals(categoryId)) {
                 return true;
             }
-            parent = parent.getParentCategory();
+            // For the next iteration, we need to fetch the parent's parent with its parent data too
+            parent = categoryRepository.findByIdWithParent(parent.getParentCategory().getCategoryId()).orElse(null);
         }
 
         return false;

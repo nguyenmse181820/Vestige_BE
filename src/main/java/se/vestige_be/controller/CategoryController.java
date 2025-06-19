@@ -15,9 +15,7 @@ import se.vestige_be.service.CategoryService;
 @Tag(name = "Category", description = "API for category management")
 @AllArgsConstructor
 public class CategoryController {
-    private final CategoryService categoryService;
-
-    @GetMapping
+    private final CategoryService categoryService;    @GetMapping
     public ResponseEntity<?> getCategories() {
         return ResponseEntity.status(HttpStatus.OK).body(
                 ObjectResponse.builder()
@@ -26,7 +24,17 @@ public class CategoryController {
                         .data(categoryService.findAll())
                         .build()
         );
+    }
 
+    @GetMapping("/{id}")
+    public ResponseEntity<?> getCategoryById(@PathVariable Long id) {
+        return ResponseEntity.status(HttpStatus.OK).body(
+                ObjectResponse.builder()
+                        .status(HttpStatus.OK.toString())
+                        .message("Successfully retrieved category")
+                        .data(categoryService.getCategoryById(id))
+                        .build()
+        );
     }
 
     @PostMapping()

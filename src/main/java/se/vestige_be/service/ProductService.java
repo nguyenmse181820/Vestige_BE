@@ -2,11 +2,13 @@ package se.vestige_be.service;
 
 import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import se.vestige_be.dto.request.AdminProductUpdateRequest;
 import se.vestige_be.dto.request.ProductImageRequest;
 import se.vestige_be.dto.request.ProductCreateRequest;
 import se.vestige_be.dto.request.ProductUpdateRequest;
@@ -39,6 +41,7 @@ import java.util.stream.IntStream;
 @Service
 @RequiredArgsConstructor
 @Transactional(readOnly = true)
+@Slf4j
 public class ProductService {
 
     private final ProductRepository productRepository;
@@ -74,9 +77,23 @@ public class ProductService {
 
         Specification<Product> spec = buildAdminProductSpecification(filterDto);
         Page<Product> products = productRepository.findAll(spec, pageable);
+        List<ProductListResponse> responseList = products.getContent().stream()
+                .map(this::convertToListResponse)
+                .toList();
 
-        return PagedResponse.of(products.map(this::convertToListResponse));
+        PagedResponse.PageMetadata pagination = PagedResponse.PageMetadata.builder()
+                .currentPage(products.getNumber())
+                .pageSize(products.getSize())
+                .totalPages(products.getTotalPages())
+                .totalElements(products.getTotalElements())
+                .build();
+
+        return PagedResponse.<ProductListResponse>builder()
+                .content(responseList)
+                .pagination(pagination)
+                .build();
     }
+
     private Specification<Product> buildAdminProductSpecification(ProductFilterResponse filterDto) {
         Specification<Product> spec = Specification.where(null);
 
@@ -117,10 +134,8 @@ public class ProductService {
                 return null;
             }
         };
-    }
-
-    public Optional<ProductDetailResponse> getProductById(Long productId) {
-        return productRepository.findById(productId)
+    }    public Optional<ProductDetailResponse> getProductById(Long productId) {
+        return productRepository.findByIdWithRelations(productId)
                 .map(this::convertToDetailResponse);
     }
 
@@ -171,19 +186,34 @@ public class ProductService {
 
         Product savedProduct = productRepository.save(product);
         return convertToDetailResponse(savedProduct);
-    }
-
-    @Transactional
+    }    @Transactional
     public ProductDetailResponse updateProduct(Long productId, ProductUpdateRequest request, Long sellerId) {
-        Product product = productRepository.findById(productId)
+        Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
 
+        // Security check: Only the seller can update their own product
         if (!product.getSeller().getUserId().equals(sellerId)) {
             throw new UnauthorizedException("You are not authorized to update this product.");
         }
 
+        // Business rule: Cannot update sold products
         if (ProductStatus.SOLD.equals(product.getStatus())) {
             throw new BusinessLogicException("Cannot update a product that has been sold.");
+        }        // Enhanced business rule for DRAFT vs non-DRAFT products
+        if (ProductStatus.DRAFT.equals(product.getStatus())) {
+            // For DRAFT products: Users can update everything freely until admin approval
+            // Only restriction: they cannot change status from DRAFT to anything else
+            if (request.hasStatus() && !ProductStatus.DRAFT.equals(request.getStatus())) {
+                throw new BusinessLogicException("Cannot change status from DRAFT. Only admin can approve draft products.");
+            }
+            log.debug("Updating DRAFT product {} by seller {} - full edit permissions", productId, sellerId);
+        } else {
+            // For non-DRAFT products: Restricted updates as before
+            // Users can only set ACTIVE or INACTIVE status
+            if (request.hasStatus() && !request.isValidUserStatus()) {
+                throw new BusinessLogicException("Invalid status. Users can only set ACTIVE or INACTIVE status for approved products.");
+            }
+            log.debug("Updating approved product {} by seller {} - restricted edit permissions", productId, sellerId);
         }
 
         if (request.hasCategoryId() && !product.getCategory().getCategoryId().equals(request.getCategoryId())) {
@@ -225,13 +255,14 @@ public class ProductService {
             BigDecimal currentPriceToCheck = request.hasPrice() ? request.getPrice() : product.getPrice();
             if (currentPriceToCheck != null && request.getOriginalPrice().compareTo(currentPriceToCheck) < 0) {
                 throw new BusinessLogicException("Original price must be greater than or equal to current price.");
-            }
-            product.setOriginalPrice(request.getOriginalPrice());
+            }            product.setOriginalPrice(request.getOriginalPrice());
         }
 
         if (request.hasImageUrls()) {
-            product.getImages().clear();
+            // Delete existing images from database first
             productImageRepository.deleteAll(product.getImages());
+            // Then clear the collection
+            product.getImages().clear();
 
             List<ProductImage> newImages = IntStream.range(0, request.getImageUrls().size())
                     .mapToObj(i -> ProductImage.builder()
@@ -247,11 +278,9 @@ public class ProductService {
 
         Product savedProduct = productRepository.save(product);
         return convertToDetailResponse(savedProduct);
-    }
-
-    @Transactional
+    }    @Transactional
     public void deleteProduct(Long productId, Long sellerId) {
-        Product product = productRepository.findById(productId)
+        Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
 
         if (!product.getSeller().getUserId().equals(sellerId)) {
@@ -265,16 +294,20 @@ public class ProductService {
         product.setStatus(ProductStatus.DELETED);
         product.setUpdatedAt(LocalDateTime.now());
         productRepository.save(product);
-    }
-
-    @Transactional
+    }    @Transactional
     public ProductDetailResponse manageProductImage(Long productId, ProductImageRequest request, Long sellerId) {
-        Product product = productRepository.findById(productId)
+        Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
 
         if (!product.getSeller().getUserId().equals(sellerId)) {
             throw new UnauthorizedException("You are not authorized to modify images for this product.");
         }
+
+        return processImageManagement(product, request);
+    }
+
+    // Extract image management logic for reuse
+    private ProductDetailResponse processImageManagement(Product product, ProductImageRequest request) {
 
         if (request.getImageId() != null) {
             ProductImage imageToUpdate = product.getImages().stream()
@@ -576,7 +609,163 @@ public class ProductService {
                         .build() : null)
                 .images(images)
                 .discountPercentage(discountPercentage)
-                .hasDiscount(hasDiscount)
+                .hasDiscount(hasDiscount)                .build();
+    }
+
+    /**
+     * Admin-only method to update any product with enhanced permissions
+     */    @Transactional
+    public ProductDetailResponse updateProductAsAdmin(Long productId, AdminProductUpdateRequest request, Long adminId) {
+        Product product = productRepository.findByIdWithRelations(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
+
+        log.info("Admin {} updating product {} owned by seller {}", 
+                adminId, productId, product.getSeller().getUserId());
+
+        // Admin can change seller ownership
+        if (request.hasSellerId()) {
+            User newSeller = userRepository.findById(request.getSellerId())
+                    .orElseThrow(() -> new ResourceNotFoundException("New seller not found with ID: " + request.getSellerId()));
+            product.setSeller(newSeller);
+            log.info("Admin {} transferred product {} ownership from seller {} to seller {}", 
+                    adminId, productId, product.getSeller().getUserId(), request.getSellerId());
+        }
+
+        // Update basic fields (similar to user update but without restrictions)
+        if (request.hasCategoryId()) {
+            Category category = categoryRepository.findById(request.getCategoryId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Category not found with ID: " + request.getCategoryId()));
+            product.setCategory(category);
+        }
+
+        if (request.hasBrandId()) {
+            Brand brand = brandRepository.findById(request.getBrandId())
+                    .orElseThrow(() -> new ResourceNotFoundException("Brand not found with ID: " + request.getBrandId()));
+            product.setBrand(brand);
+        }
+
+        if (request.hasTitle()) {
+            // Admin can override title uniqueness check if needed
+            product.setTitle(request.getTitle());
+        }
+
+        if (request.hasDescription()) product.setDescription(request.getDescription());
+        if (request.hasCondition()) product.setCondition(request.getCondition());
+        if (request.hasSize()) product.setSize(request.getSize());
+        if (request.hasColor()) product.setColor(request.getColor());
+        
+        // Admin can set any status including SOLD, REPORTED, BANNED, etc.
+        if (request.hasStatus()) {
+            ProductStatus oldStatus = product.getStatus();
+            product.setStatus(request.getStatus());
+            
+            // Handle special status transitions
+            if (request.getStatus() == ProductStatus.SOLD && request.hasForceSoldStatus() && request.getForceSoldStatus()) {
+                product.setSoldAt(java.time.LocalDateTime.now());
+                log.info("Admin {} forced product {} to SOLD status", adminId, productId);
+            } else if (request.getStatus() == ProductStatus.ACTIVE && oldStatus == ProductStatus.SOLD) {
+                product.setSoldAt(null);
+                log.info("Admin {} reverted product {} from SOLD to ACTIVE", adminId, productId);
+            }
+        }
+
+        if (request.hasPrice()) {
+            product.setPrice(request.getPrice());
+        }        if (request.hasOriginalPrice()) {
+            product.setOriginalPrice(request.getOriginalPrice());
+        }
+
+        if (request.hasImageUrls()) {
+            // Delete existing images from database first
+            productImageRepository.deleteAll(product.getImages());
+            // Then clear the collection
+            product.getImages().clear();
+
+            List<ProductImage> newImages = IntStream.range(0, request.getImageUrls().size())
+                    .mapToObj(i -> ProductImage.builder()
+                            .product(product)
+                            .imageUrl(request.getImageUrls().get(i))
+                            .isPrimary(i == 0)
+                            .displayOrder(i + 1)
+                            .active(true)
+                            .build())
+                    .toList();
+            product.getImages().addAll(newImages);
+        }
+
+        // Admin-specific fields
+        if (request.hasAdminNotes()) {
+            // Assuming there's an adminNotes field in Product entity, or log it
+            log.info("Admin {} added notes to product {}: {}", adminId, productId, request.getAdminNotes());
+            // product.setAdminNotes(request.getAdminNotes()); // Uncomment if field exists
+        }
+
+        Product savedProduct = productRepository.save(product);
+        log.info("Admin {} successfully updated product {}", adminId, productId);
+        
+        return convertToDetailResponse(savedProduct);
+    }
+
+    /**
+     * Get all products for a seller with any status (for seller's own products)
+     */
+    public PagedResponse<ProductListResponse> getSellerProductsWithAllStatuses(
+            Long sellerId, int page, int size, String sortBy, String sortDir, String status) {
+        
+        Pageable pageable = PaginationUtils.createPageable(page, size, sortBy, sortDir);
+        
+        ProductFilterResponse filterDto = ProductFilterResponse.builder()
+                .sellerId(sellerId)
+                .status(status)
+                .build();
+        
+        // Use admin specification to get all statuses for seller's own products
+        Specification<Product> spec = buildAdminProductSpecification(filterDto);
+        Page<Product> products = productRepository.findAll(spec, pageable);
+
+        List<ProductListResponse> responseList = products.getContent().stream()
+                .map(this::convertToListResponse)
+                .toList();
+
+        PagedResponse.PageMetadata pagination = PagedResponse.PageMetadata.builder()
+                .currentPage(products.getNumber())
+                .pageSize(products.getSize())
+                .totalPages(products.getTotalPages())
+                .totalElements(products.getTotalElements())
+                .build();
+
+        return PagedResponse.<ProductListResponse>builder()
+                .content(responseList)
+                .pagination(pagination)
                 .build();
     }
+
+    /**
+     * Admin-only method to delete any product
+     */    @Transactional
+    public void deleteProductAsAdmin(Long productId, Long adminId) {
+        Product product = productRepository.findByIdWithRelations(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
+
+        log.info("Admin {} deleting product {} owned by seller {}", 
+                adminId, productId, product.getSeller().getUserId());
+
+        // Admin can delete any product regardless of status
+        product.setStatus(ProductStatus.DELETED);
+        product.setUpdatedAt(LocalDateTime.now());
+        productRepository.save(product);
+
+        log.info("Admin {} successfully deleted product {}", adminId, productId);
+    }    /**
+     * Admin-only method to manage images on any product
+     */    @Transactional
+    public ProductDetailResponse manageProductImageAsAdmin(Long productId, ProductImageRequest request, Long adminId) {
+        Product product = productRepository.findByIdWithRelations(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));log.info("Admin {} managing images for product {} owned by seller {}", 
+                adminId, productId, product.getSeller().getUserId());
+
+        // Admin can manage images on any product - reuse existing logic
+        return processImageManagement(product, request);
+    }
+
 }

@@ -15,7 +15,7 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ProductUpdateRequest {
+public class AdminProductUpdateRequest {
     @Size(min = 5, max = 100, message = "Title must be between 5 and 100 characters")
     private String title;
 
@@ -28,7 +28,9 @@ public class ProductUpdateRequest {
 
     @DecimalMin(value = "0.01", message = "Original price must be greater than 0")
     @DecimalMax(value = "99999999.99", message = "Original price cannot exceed 99,999,999.99 VND")
-    private BigDecimal originalPrice;    private ProductCondition condition;
+    private BigDecimal originalPrice;
+
+    private ProductCondition condition;
 
     @Size(max = 20, message = "Size cannot exceed 20 characters")
     private String size;
@@ -36,19 +38,24 @@ public class ProductUpdateRequest {
     @Size(max = 50, message = "Color cannot exceed 50 characters")
     private String color;
 
-    // Users can only set ACTIVE or INACTIVE status (not SOLD, REPORTED, etc.)
+    // Admin can change any status including SOLD, INACTIVE, REPORTED, etc.
     private ProductStatus status;
+    
     private Long categoryId;
     private Long brandId;
     private List<String> imageUrls;
 
-    // Validation for user updates - restrict certain statuses
-    public boolean isValidUserStatus() {
-        return status == null || 
-               status == ProductStatus.ACTIVE || 
-               status == ProductStatus.INACTIVE;
-    }
+    // Admin-specific fields
+    @Size(max = 1000, message = "Admin notes cannot exceed 1000 characters")
+    private String adminNotes;
 
+    // Allow admin to change seller (transfer ownership)
+    private Long sellerId;
+
+    // Admin can override sold status and date
+    private Boolean forceSoldStatus;
+
+    // Helper methods
     public boolean hasTitle() { return title != null; }
     public boolean hasDescription() { return description != null; }
     public boolean hasPrice() { return price != null; }
@@ -60,4 +67,7 @@ public class ProductUpdateRequest {
     public boolean hasCategoryId() { return categoryId != null; }
     public boolean hasBrandId() { return brandId != null; }
     public boolean hasImageUrls() { return imageUrls != null && !imageUrls.isEmpty(); }
+    public boolean hasAdminNotes() { return adminNotes != null; }
+    public boolean hasSellerId() { return sellerId != null; }
+    public boolean hasForceSoldStatus() { return forceSoldStatus != null; }
 }

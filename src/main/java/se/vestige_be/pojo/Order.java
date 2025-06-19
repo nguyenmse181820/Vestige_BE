@@ -43,14 +43,16 @@ public class Order {
     @Enumerated(EnumType.STRING)
     @Column(nullable = false, length = 20)
     @Builder.Default
-    private OrderStatus status = OrderStatus.PENDING;
-
-    @CreationTimestamp
+    private OrderStatus status = OrderStatus.PENDING;    @CreationTimestamp
     private LocalDateTime createdAt;
 
     private LocalDateTime paidAt;
     private LocalDateTime shippedAt;
     private LocalDateTime deliveredAt;
+
+    // Stripe payment tracking
+    @Column(length = 100)
+    private String stripePaymentIntentId;
 
     @OneToMany(mappedBy = "order", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
     @Builder.Default

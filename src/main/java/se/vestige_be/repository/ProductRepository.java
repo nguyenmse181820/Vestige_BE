@@ -5,6 +5,8 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
+import org.springframework.data.jpa.repository.Query;
+import org.springframework.data.repository.query.Param;
 import se.vestige_be.pojo.Product;
 import se.vestige_be.pojo.enums.ProductStatus;
 
@@ -26,4 +28,7 @@ public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpeci
     Optional<Product> findBySellerUserIdAndTitle(Long sellerId, String title);
 
     boolean existsBySellerUserIdAndTitleAndProductIdNot(Long sellerId, @Size(min = 5, max = 100, message = "Title must be between 5 and 100 characters") String title, Long productId);
+
+    @Query("SELECT p FROM Product p LEFT JOIN FETCH p.category LEFT JOIN FETCH p.brand LEFT JOIN FETCH p.seller WHERE p.productId = :id")
+    Optional<Product> findByIdWithRelations(@Param("id") Long id);
 }

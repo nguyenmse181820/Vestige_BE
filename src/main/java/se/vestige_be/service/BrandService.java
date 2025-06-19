@@ -27,10 +27,8 @@ public class BrandService {
                 .logoUrl(brand.getLogoUrl())
                 .createdAt(brand.getCreatedAt())
                 .build();
-    }
-
-    @Transactional
-    public Brand createBrand(String name, String logoUrl) {
+    }    @Transactional
+    public BrandResponse createBrand(String name, String logoUrl) {
         if(brandRepository.existsByName(name)){
             throw new RuntimeException("Brand with name " + name + " already exists");
         }
@@ -39,11 +37,12 @@ public class BrandService {
                 .logoUrl(logoUrl)
                 .createdAt(LocalDateTime.now())
                 .build();
-        return brandRepository.save(brand);
+        Brand savedBrand = brandRepository.save(brand);
+        return convertToDTO(savedBrand);
     }
 
     @Transactional
-    public Brand updateBrand(Long brandId, String name, String logoUrl) {
+    public BrandResponse updateBrand(Long brandId, String name, String logoUrl) {
         Brand existingBrand = brandRepository.findById(brandId)
                 .orElseThrow(() -> new RuntimeException("Brand not found with id: " + brandId));
 
@@ -57,7 +56,8 @@ public class BrandService {
         if(logoUrl != null) {
             existingBrand.setLogoUrl(logoUrl);
         }
-        return brandRepository.save(existingBrand);
+        Brand savedBrand = brandRepository.save(existingBrand);
+        return convertToDTO(savedBrand);
     }
 
     @Transactional
@@ -65,9 +65,11 @@ public class BrandService {
         Brand brand = brandRepository.findById(id)
                 .orElseThrow(() -> new RuntimeException("Brand with id '" + id + "' not found"));
 
-        if(!brand.getProducts().isEmpty()) {
+        // Use query to count products instead of accessing lazy collection
+        long productCount = brandRepository.countProductsByBrandId(id);
+        if(productCount > 0) {
             throw new RuntimeException("Cannot delete brand '" + id + "': has " +
-                    brand.getProducts().size() + " associated products");
+                    productCount + " associated products");
         }
 
         brandRepository.delete(brand);

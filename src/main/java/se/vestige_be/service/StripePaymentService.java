@@ -6,6 +6,9 @@ import com.stripe.model.*;
 import com.stripe.model.checkout.Session;
 import com.stripe.param.*;
 import com.stripe.param.checkout.SessionCreateParams;
+import lombok.AllArgsConstructor;
+import lombok.Data;
+import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -196,15 +199,12 @@ public class StripePaymentService {
             return offer.getAmount();
         }
         return product.getPrice();
-    }
+    }    private String createStripeCheckoutSession(Order order, Transaction transaction, Product product) throws StripeException {        // Ensure seller has Stripe account - FIXED: Use seller, not buyer
+        String sellerStripeAccountId = getOrCreateSellerStripeAccount(transaction.getSeller());
 
-    private String createStripeCheckoutSession(Order order, Transaction transaction, Product product) throws StripeException {
-        // Ensure seller has Stripe account
-        String sellerStripeAccountId = getOrCreateSellerStripeAccount(order.getBuyer()); // Note: Using buyer for now, should be seller
-
-        // Convert VND to cents
-        long amountInCents = order.getTotalAmount().multiply(new BigDecimal("100")).longValue();
-        long platformFeeInCents = transaction.getPlatformFee().multiply(new BigDecimal("100")).longValue();
+        // VND is a zero-decimal currency - no need to multiply by 100
+        long amountInVND = order.getTotalAmount().longValue();
+        long platformFeeInVND = transaction.getPlatformFee().longValue();
 
         SessionCreateParams params = SessionCreateParams.builder()
                 .setMode(SessionCreateParams.Mode.PAYMENT)
@@ -218,12 +218,12 @@ public class StripePaymentService {
                                         .setDescription("Condition: " + product.getCondition())
                                         .addImage(getProductImageUrl(product))
                                         .build())
-                                .setUnitAmount(amountInCents)
+                                .setUnitAmount(amountInVND)
                                 .build())
                         .setQuantity(1L)
                         .build())
                 .setPaymentIntentData(SessionCreateParams.PaymentIntentData.builder()
-                        .setApplicationFeeAmount(platformFeeInCents)
+                        .setApplicationFeeAmount(platformFeeInVND)
                         .setTransferData(SessionCreateParams.PaymentIntentData.TransferData.builder()
                                 .setDestination(sellerStripeAccountId)
                                 .build())
@@ -416,7 +416,9 @@ public class StripePaymentService {
     }
 
     // Response DTOs
+    @Getter
     public static class PaymentResponse {
+        // Getters
         private Long orderId;
         private Long transactionId;
         private String productTitle;
@@ -478,17 +480,9 @@ public class StripePaymentService {
             }
         }
 
-        // Getters
-        public Long getOrderId() { return orderId; }
-        public Long getTransactionId() { return transactionId; }
-        public String getProductTitle() { return productTitle; }
-        public BigDecimal getAmount() { return amount; }
-        public BigDecimal getPlatformFee() { return platformFee; }
-        public BigDecimal getSellerAmount() { return sellerAmount; }
-        public String getCheckoutUrl() { return checkoutUrl; }
-        public String getStatus() { return status; }
     }
 
+    @Getter
     public static class TransactionStatusResponse {
         private Long transactionId;
         private Long orderId;
@@ -522,58 +516,23 @@ public class StripePaymentService {
             this.buyer = buyer;
         }
 
-        // Getters
-        public Long getTransactionId() { return transactionId; }
-        public Long getOrderId() { return orderId; }
-        public String getStatus() { return status; }
-        public String getEscrowStatus() { return escrowStatus; }
-        public BigDecimal getAmount() { return amount; }
-        public BigDecimal getPlatformFee() { return platformFee; }
-        public LocalDateTime getCreatedAt() { return createdAt; }
-        public LocalDateTime getPaidAt() { return paidAt; }
-        public LocalDateTime getDeliveredAt() { return deliveredAt; }
-        public ProductInfo getProduct() { return product; }
-        public UserInfo getSeller() { return seller; }
-        public UserInfo getBuyer() { return buyer; }
     }
 
+    @Data
+    @AllArgsConstructor
     public static class ProductInfo {
         private Long productId;
         private String title;
         private String imageUrl;
         private String condition;
-
-        public ProductInfo(Long productId, String title, String imageUrl, String condition) {
-            this.productId = productId;
-            this.title = title;
-            this.imageUrl = imageUrl;
-            this.condition = condition;
-        }
-
-        // Getters
-        public Long getProductId() { return productId; }
-        public String getTitle() { return title; }
-        public String getImageUrl() { return imageUrl; }
-        public String getCondition() { return condition; }
     }
 
+    @Data
+    @AllArgsConstructor
     public static class UserInfo {
         private Long userId;
         private String username;
         private String firstName;
         private String lastName;
-
-        public UserInfo(Long userId, String username, String firstName, String lastName) {
-            this.userId = userId;
-            this.username = username;
-            this.firstName = firstName;
-            this.lastName = lastName;
-        }
-
-        // Getters
-        public Long getUserId() { return userId; }
-        public String getUsername() { return username; }
-        public String getFirstName() { return firstName; }
-        public String getLastName() { return lastName; }
     }
 }
