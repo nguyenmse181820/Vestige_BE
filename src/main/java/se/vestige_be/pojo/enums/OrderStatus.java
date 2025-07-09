@@ -7,5 +7,8 @@ public enum OrderStatus {
     SHIPPED,
     DELIVERED,
     CANCELLED,
-    REFUNDED
+    REFUNDED,
+    // NOTE: EXPIRED is not currently supported by the database constraint
+    // Use CANCELLED for expired orders instead
+    EXPIRED
 }

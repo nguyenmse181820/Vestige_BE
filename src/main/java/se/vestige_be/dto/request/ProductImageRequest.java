@@ -12,6 +12,9 @@ import lombok.NoArgsConstructor;
 @NoArgsConstructor
 @AllArgsConstructor
 public class ProductImageRequest {
+
+    private Long imageId;
+
     @NotBlank(message = "Image URL is required")
     private String imageUrl;
 
@@ -20,4 +23,6 @@ public class ProductImageRequest {
 
     @Builder.Default
     private Boolean isPrimary = false;
+
+    private Boolean active;
 }

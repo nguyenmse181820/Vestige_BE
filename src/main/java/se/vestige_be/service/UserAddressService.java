@@ -35,8 +35,21 @@ public class UserAddressService {
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        // If this is set as default, unset other defaults
-        if (request.getIsDefault()) {
+        boolean defaultChoice;
+
+        List<UserAddress> existingAddresses = userAddressRepository.findByUserUserId(userId);
+
+        if(existingAddresses.isEmpty()) {
+            defaultChoice = true;
+        } else {
+            if(request.getIsDefault() != null) {
+                defaultChoice = request.getIsDefault();
+            } else {
+                defaultChoice = false;
+            }
+        }
+
+        if (defaultChoice) {
             unsetOtherDefaults(userId);
         }
 
@@ -48,7 +61,7 @@ public class UserAddressService {
                 .state(request.getState())
                 .postalCode(request.getPostalCode())
                 .country(request.getCountry())
-                .isDefault(request.getIsDefault())
+                .isDefault(defaultChoice)
                 .build();
 
         address = userAddressRepository.save(address);
@@ -75,8 +88,7 @@ public class UserAddressService {
             throw new UnauthorizedException("Not authorized to update this address");
         }
 
-        // If this is set as default, unset other defaults
-        if (request.getIsDefault() && !address.getIsDefault()) {
+        if (Boolean.TRUE.equals(request.getIsDefault()) && !Boolean.TRUE.equals(address.getIsDefault())) {
             unsetOtherDefaults(userId);
         }
 
@@ -86,7 +98,14 @@ public class UserAddressService {
         address.setState(request.getState());
         address.setPostalCode(request.getPostalCode());
         address.setCountry(request.getCountry());
-        address.setIsDefault(request.getIsDefault());
+        if (request.getIsDefault() != null) {
+            List<UserAddress> allUserAddresses = userAddressRepository.findByUserUserId(userId);
+            if (allUserAddresses.size() == 1 && address.getAddressId().equals(allUserAddresses.getFirst().getAddressId()) && Boolean.FALSE.equals(request.getIsDefault())) {
+                address.setIsDefault(true);
+            } else {
+                address.setIsDefault(request.getIsDefault());
+            }
+        }
 
         address = userAddressRepository.save(address);
         return convertToResponse(address);
@@ -101,7 +120,17 @@ public class UserAddressService {
             throw new UnauthorizedException("Not authorized to delete this address");
         }
 
+        boolean wasDefault = address.getIsDefault();
+
         userAddressRepository.delete(address);
+
+        if(wasDefault) {
+            List<UserAddress> remainingAddresses = userAddressRepository.findByUserUserIdOrderByIsDefaultDescCreatedAtDesc(userId);
+            UserAddress newDefaultAddress = remainingAddresses.getFirst();
+            newDefaultAddress.setIsDefault(true);
+
+            userAddressRepository.save(newDefaultAddress);
+        }
     }
 
     @Transactional
@@ -113,10 +142,8 @@ public class UserAddressService {
             throw new UnauthorizedException("Not authorized to modify this address");
         }
 
-        // Unset other defaults
         unsetOtherDefaults(userId);
 
-        // Set this as default
         address.setIsDefault(true);
         address = userAddressRepository.save(address);
 
@@ -125,7 +152,11 @@ public class UserAddressService {
 
     private void unsetOtherDefaults(Long userId) {
         List<UserAddress> defaultAddresses = userAddressRepository.findByUserUserIdAndIsDefaultTrue(userId);
-        defaultAddresses.forEach(addr -> addr.setIsDefault(false));
+        defaultAddresses.forEach(addr -> {
+            if (Boolean.TRUE.equals(addr.getIsDefault())) {
+                addr.setIsDefault(false);
+            }
+        });
         userAddressRepository.saveAll(defaultAddresses);
     }
 

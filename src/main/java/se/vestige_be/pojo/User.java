@@ -94,7 +94,7 @@ public class User {
     @JsonIgnore
     private List<UserMembership> memberships = new ArrayList<>();
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id")
     @ToString.Exclude
     private Role role;
@@ -153,4 +153,6 @@ public class User {
     @Builder.Default
     @JsonIgnore
     private List<UserFollow> followers = new ArrayList<>();
+
+    private String stripeAccountId;
 }

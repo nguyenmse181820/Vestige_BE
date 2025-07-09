@@ -1,22 +1,28 @@
 spring:
   application:
     name: Vestige_BE
+
+  # Enable scheduling for escrow transfers
   task:
     scheduling:
       enabled: true
+      pool:
+        size: 2
+
   datasource:
-    url: ${DATABASE_URL:jdbc:postgresql://localhost:5432/vestige}
+    url: ${DATABASE_URL}
     username: ${DATABASE_USERNAME:postgres}
     password: ${DATABASE_PASSWORD}
     driver-class-name: org.postgresql.Driver
+
   jpa:
     hibernate:
       ddl-auto: update
     properties:
       hibernate:
-        dialect: org.hibernate.dialect.PostgreSQLDialect
         format_sql: true
     show-sql: false
+    open-in-view: false
 
   # Jackson Configuration
   jackson:
@@ -26,61 +32,94 @@ spring:
     deserialization:
       fail-on-unknown-properties: false
     time-zone: Asia/Ho_Chi_Minh
-    date-format: yyyy-MM-dd HH:mm:ss
 
-  # CORS Configuration
-  web:
-    cors:
-      allowed-origins:
-        - "http://localhost:3000"
-        - "http://127.0.0.1:3000"
-      allowed-methods: "*"
-      allowed-headers: "*"
-      allow-credentials: true
-      max-age: 3600
+stripe:
+  api:
+    secret-key: ${STRIPE_SECRET_KEY}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY}
+  currency: vnd
+  webhook:
+    secret: ${STRIPE_WEBHOOK_SECRET}
+
+# JWT Configuration
+jwt:
+  secret: ${JWT_SECRET}
+  expiration: ${JWT_EXPIRATION:3600000}
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}
+
+# App Configuration
+app:
+  frontend:
+    url: ${FRONTEND_URL:http://localhost:3000}
+
+# CORS Configuration
+cors:
+  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173}
+  allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,PATCH,DELETE,OPTIONS}
+  allowed-headers: ${CORS_ALLOWED_HEADERS:*}
+  allow-credentials: true
+  max-age: 3600
+
+server:
+  port: ${PORT:8080}
 
 # Management endpoints
 management:
   endpoints:
     web:
       exposure:
-        include: health,info
-      cors:
-        allowed-origins: "http://localhost:3000"
-        allowed-methods: "GET,POST"
+        include: health,info,metrics
+  endpoint:
+    health:
+      show-details: when-authorized
 
-jwt:
-  secret: ${JWT_SECRET}
-  expiration: ${JWT_EXPIRATION:3600000}
-  refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}
-server:
-  port: ${PORT:8080}
-
-cors:
-  allowed-origins: ${CORS_ALLOWED_ORIGINS:http://localhost:3000,http://localhost:5173,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:5173}
-  allowed-methods: ${CORS_ALLOWED_METHODS:GET,POST,PUT,PATCH,DELETE,OPTIONS}
-  allowed-headers: ${CORS_ALLOWED_HEADERS:*}
-  allow-credentials: ${CORS_ALLOW_CREDENTIALS:true}
-  max-age: ${CORS_MAX_AGE:3600}
-
-# Swagger OpenAPI Configuration
+# Swagger Configuration
 springdoc:
   api-docs:
     path: /v3/api-docs
   swagger-ui:
     path: /swagger-ui.html
-    tags-sorter: alpha
-    operations-sorter: method
-    display-request-duration: true
-  packages-to-scan: se.vestige_be.controller
   paths-to-match: /api/**
-  show-actuator: false
-  default-consumes-media-type: application/json
-  default-produces-media-type: application/json
 
-# Logging Configuration
+# Logging
 logging:
   level:
     se.vestige_be: INFO
     org.springframework.web.socket: DEBUG
-    com.fasterxml.jackson: INFO
+    com.stripe: DEBUG
+
+---
+# Local Profile
+spring:
+  config:
+    activate:
+      on-profile: local
+  datasource:
+    url: jdbc:postgresql://localhost:5432/vestige
+    username: postgres
+    password: ${DATABASE_PASSWORD:12345}
+  jpa:
+    show-sql: true
+
+# Use environment variables for Stripe keys in local development
+stripe:
+  api:
+    secret-key: ${STRIPE_SECRET_KEY}
+    publishable-key: ${STRIPE_PUBLISHABLE_KEY}
+  webhook:
+    secret: ${STRIPE_WEBHOOK_SECRET}
+  currency: vnd
+
+---
+# Production Profile
+spring:
+  config:
+    activate:
+      on-profile: prod
+  jpa:
+    show-sql: false
+
+logging:
+  level:
+    se.vestige_be: WARN
+    root: WARN

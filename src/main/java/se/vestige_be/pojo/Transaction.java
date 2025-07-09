@@ -84,6 +84,10 @@ public class Transaction {
     @Column(columnDefinition = "text")
     private String disputeReason;
 
+    private String stripePaymentIntentId;
+
+    private String stripeTransferId;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 

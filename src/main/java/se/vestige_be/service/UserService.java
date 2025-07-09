@@ -1,18 +1,22 @@
 package se.vestige_be.service;
 
+import com.stripe.model.Account;
 import jakarta.persistence.EntityNotFoundException;
 import lombok.AllArgsConstructor;
+import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import se.vestige_be.dto.request.AdminCreateUserRequest;
 import se.vestige_be.dto.request.RegisterRequest;
 import se.vestige_be.dto.request.UpdateProfileRequest;
 import se.vestige_be.dto.response.PagedResponse;
 import se.vestige_be.dto.response.UserListResponse;
 import se.vestige_be.dto.response.UserProfileResponse;
+import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.pojo.Role;
 import se.vestige_be.pojo.User;
@@ -28,6 +32,7 @@ import java.util.List;
 
 @Service
 @AllArgsConstructor
+@Slf4j
 public class UserService {
 
     private final UserRepository userRepository;
@@ -42,6 +47,11 @@ public class UserService {
     public User findByUsername(String username) {
         return userRepository.findByUsername(username)
                 .orElseThrow(() -> new RuntimeException("User not found with username: " + username));
+    }
+
+    @Transactional
+    public User save(User user) {
+        return userRepository.save(user);
     }
 
     public User findById(Long userId) {
@@ -152,6 +162,35 @@ public class UserService {
     }
 
     @Transactional
+    public void handleStripeAccountUpdate(Account account) {
+        userRepository.findByStripeAccountId(account.getId()).ifPresent(user -> {
+            log.info("Updating user {} based on Stripe account update from webhook.", user.getUsername());
+
+            boolean isVerified = Boolean.TRUE.equals(account.getChargesEnabled()) && Boolean.TRUE.equals(account.getPayoutsEnabled());
+            user.setIsVerified(isVerified);
+
+            String disabledReason = null;
+            if (account.getRequirements() != null) {
+                disabledReason = account.getRequirements().getDisabledReason();
+            }
+
+            if (disabledReason != null) {
+                user.setAccountStatus("restricted");
+                log.warn("Stripe account for user {} has been restricted. Reason: {}", user.getUsername(), disabledReason);
+            } else if (isVerified) {
+                user.setAccountStatus("active");
+            } else {
+                // Nếu không được xác minh và cũng không có lý do vô hiệu hóa rõ ràng
+                // có thể tài khoản đang ở trạng thái 'pending' hoặc 'incomplete'
+                user.setAccountStatus("pending_verification");
+            }
+            userRepository.save(user);
+            log.info("User {} verification status set to: {}. Account status set to: {}",
+                    user.getUsername(), isVerified, user.getAccountStatus());
+        });
+    }
+
+    @Transactional
     public User processLogin(String username) {
         User user = findByUsername(username);
         user.setLastLoginAt(LocalDateTime.now());
@@ -221,6 +260,47 @@ public class UserService {
                 .totalProductsListed(totalProductsListed.intValue())
                 .activeProductsCount(activeProductsCount.intValue())
                 .build();
+    }
+
+    @Transactional
+    public UserProfileResponse createUserByAdmin(AdminCreateUserRequest request) {
+        if (userRepository.existsByUsername(request.getUsername())) {
+            throw new BusinessLogicException("Username '" + request.getUsername() + "' already exists.");
+        }
+
+        if (userRepository.existsByEmail(request.getEmail())) {
+            throw new BusinessLogicException("Email '" + request.getEmail() + "' already exists.");
+        }
+
+        Role roleToAssign = roleRepository.findByName(request.getRoleName().toUpperCase())
+                .orElseThrow(() -> {
+                    return new BusinessLogicException("Role '" + request.getRoleName() + "' not found. Ensure roles like USER, ADMIN exist.");
+                });
+
+        User user = User.builder()
+                .username(request.getUsername())
+                .email(request.getEmail())
+                .passwordHash(passwordEncoder.encode(request.getPassword()))
+                .firstName(request.getFirstName())
+                .lastName(request.getLastName())
+                .phoneNumber(request.getPhoneNumber())
+                .dateOfBirth(request.getDateOfBirth())
+                .gender(request.getGender())
+                .role(roleToAssign)
+                .isVerified(request.getIsVerified() != null ? request.getIsVerified() : false)
+                .isLegitProfile(request.getIsLegitProfile() != null ? request.getIsLegitProfile() : false)
+                .accountStatus(request.getAccountStatus() != null ? request.getAccountStatus().toLowerCase() : "active")
+                .sellerRating(BigDecimal.ZERO)
+                .sellerReviewsCount(0)
+                .successfulTransactions(0)
+                .trustScore(BigDecimal.ZERO)
+                .joinedDate(LocalDateTime.now())
+                .addresses(new ArrayList<>())
+                .memberships(new ArrayList<>())
+                .build();
+
+        User savedUser = userRepository.save(user);
+        return convertToProfileResponse(savedUser);
     }
 
     private UserProfileResponse convertToProfileResponse(User user) {

@@ -10,8 +10,10 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import se.vestige_be.dto.request.AdminCreateUserRequest;
 import se.vestige_be.dto.request.UpdateProfileRequest;
 import se.vestige_be.dto.response.*;
+import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.service.UserService;
 import se.vestige_be.util.PaginationUtils;
 
@@ -66,6 +68,34 @@ public class UserController {
                 .message("Profile retrieved successfully")
                 .data(profile)
                 .build());
+    }
+
+    @PostMapping("/create-user")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<UserProfileResponse>> adminCreateUser(
+            @Valid @RequestBody AdminCreateUserRequest request,
+            @AuthenticationPrincipal UserDetails adminDetails) {
+        try {
+            UserProfileResponse userProfile = userService.createUserByAdmin(request);
+            return ResponseEntity.status(HttpStatus.CREATED)
+                    .body(ApiResponse.<UserProfileResponse>builder()
+                            .status(HttpStatus.CREATED.toString())
+                            .message("User created successfully by admin.")
+                            .data(userProfile)
+                            .build());
+        } catch (BusinessLogicException e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.<UserProfileResponse>builder()
+                            .status(HttpStatus.BAD_REQUEST.toString())
+                            .message(e.getMessage())
+                            .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.<UserProfileResponse>builder()
+                            .status(HttpStatus.INTERNAL_SERVER_ERROR.toString())
+                            .message("An unexpected error occurred while creating the user.")
+                            .build());
+        }
     }
 
     @PatchMapping("/profile")

@@ -12,7 +12,16 @@ public class PaginationUtils {
     public static Pageable createPageable(int page, int size, String sortBy, String sortDir) {
         Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ?
                 Sort.Direction.DESC : Sort.Direction.ASC;
-        return PageRequest.of(page, size, Sort.by(direction, sortBy));
+        // Support aliases for viewCount and likeCount
+        String actualSortBy;
+        if ("viewCount".equalsIgnoreCase(sortBy)) {
+            actualSortBy = "viewsCount";
+        } else if ("likeCount".equalsIgnoreCase(sortBy)) {
+            actualSortBy = "likesCount";
+        } else {
+            actualSortBy = sortBy;
+        }
+        return PageRequest.of(page, size, Sort.by(direction, actualSortBy));
     }
 
     public static Map<String, Object> createFilters(String search, Long categoryId, Long brandId) {

@@ -3,6 +3,7 @@ package se.vestige_be.pojo;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp; // Optional: if all updates should refresh it
 
 import java.time.LocalDateTime;
 
@@ -32,6 +33,13 @@ public class ProductImage {
     @Column(nullable = false)
     private Integer displayOrder;
 
+    @Builder.Default
+    private Boolean active = true;
+
     @CreationTimestamp
+    @Column(nullable = false, updatable = false)
     private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 }

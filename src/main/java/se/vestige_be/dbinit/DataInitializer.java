@@ -236,6 +236,8 @@ public class DataInitializer implements CommandLineRunner {
                 // Order 1: PENDING - John buys Gucci Bag from Jane
                 Order order1 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
+                        .paymentMethod(PaymentMethod.COD)
+                        .totalAmount(gucciBag.getPrice())
                         .status(OrderStatus.PENDING).createdAt(LocalDateTime.now().minusDays(5))
                         .build();
                 OrderItem item1_1 = OrderItem.builder().order(order1).product(gucciBag).seller(gucciBag.getSeller())
@@ -250,6 +252,8 @@ public class DataInitializer implements CommandLineRunner {
                 // Order 2: PAID (Items PROCESSING) - John buys iPhone from Mike
                 Order order2 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
+                        .paymentMethod(PaymentMethod.STRIPE_CARD)
+                        .totalAmount(iphone.getPrice())
                         .status(OrderStatus.PAID).paidAt(LocalDateTime.now().minusDays(4)).createdAt(LocalDateTime.now().minusDays(4))
                         .build();
                 OrderItem item2_1 = OrderItem.builder().order(order2).product(iphone).seller(iphone.getSeller())
@@ -262,7 +266,6 @@ public class DataInitializer implements CommandLineRunner {
                 orders.add(order2);
 
                 // Order 3: SHIPPED - John buys Nike Sneakers from Jane
-                // For this, we'll need another product from Jane
                 Product nikeHoodieJane = Product.builder().seller(userRepository.findByUsername("jansmith").orElseThrow())
                         .category(categoryRepository.findByName("Women's Fashion").orElseThrow())
                         .brand(brandRepository.findByName("Nike").orElseThrow())
@@ -276,6 +279,8 @@ public class DataInitializer implements CommandLineRunner {
 
                 Order order3 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
+                        .paymentMethod(PaymentMethod.COD)
+                        .totalAmount(nikeHoodieJane.getPrice())
                         .status(OrderStatus.SHIPPED).paidAt(LocalDateTime.now().minusDays(3)).shippedAt(LocalDateTime.now().minusDays(2))
                         .createdAt(LocalDateTime.now().minusDays(3))
                         .build();
@@ -289,7 +294,7 @@ public class DataInitializer implements CommandLineRunner {
                 orders.add(order3);
 
 
-                // Order 4: DELIVERED - John buys another item (let's create one) from Mike
+                // Order 4: DELIVERED - John buys another item from Mike
                 Product anotherElectronic = Product.builder().seller(userRepository.findByUsername("mikewilson").orElseThrow())
                         .category(categoryRepository.findByName("Electronics").orElseThrow())
                         .brand(brandRepository.findByName("Samsung").orElseThrow())
@@ -302,6 +307,8 @@ public class DataInitializer implements CommandLineRunner {
 
                 Order order4 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
+                        .paymentMethod(PaymentMethod.STRIPE_CARD)
+                        .totalAmount(anotherElectronic.getPrice())
                         .status(OrderStatus.DELIVERED)
                         .paidAt(LocalDateTime.now().minusDays(10))
                         .shippedAt(LocalDateTime.now().minusDays(8))
@@ -320,6 +327,8 @@ public class DataInitializer implements CommandLineRunner {
                 // Order 5: CANCELLED - John attempted to buy Nike Sneakers from Jane, but cancelled
                 Order order5 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
+                        .paymentMethod(PaymentMethod.COD)
+                        .totalAmount(nikeSneakers.getPrice())
                         .status(OrderStatus.CANCELLED).createdAt(LocalDateTime.now().minusDays(1))
                         .build();
                 OrderItem item5_1 = OrderItem.builder().order(order5).product(nikeSneakers).seller(nikeSneakers.getSeller())
@@ -327,8 +336,6 @@ public class DataInitializer implements CommandLineRunner {
                         .feePercentage(feePercentage).status(OrderItemStatus.CANCELLED).escrowStatus(EscrowStatus.REFUNDED)
                         .build();
                 order5.setOrderItems(List.of(item5_1));
-                // Product status should revert to ACTIVE if it was marked SOLD and then cancelled
-                // Assuming it was active before this order attempt or if it was the only item from this product sold.
                 nikeSneakers.setStatus(ProductStatus.ACTIVE);
                 productRepository.save(nikeSneakers);
                 orders.add(order5);

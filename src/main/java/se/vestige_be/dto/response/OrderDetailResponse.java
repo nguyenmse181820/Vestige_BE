@@ -1,5 +1,6 @@
 package se.vestige_be.dto.response;
 
+import com.fasterxml.jackson.annotation.JsonInclude;
 import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
@@ -7,6 +8,7 @@ import lombok.NoArgsConstructor;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 
@@ -14,6 +16,7 @@ import java.util.Map;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
+@JsonInclude(JsonInclude.Include.NON_NULL)
 public class OrderDetailResponse {
     private Long orderId;
     private String status;
@@ -23,16 +26,18 @@ public class OrderDetailResponse {
     private String notes;
     private Integer totalItems;
     private Integer uniqueSellers;
-    private LocalDateTime createdAt;
-    private LocalDateTime paidAt;
+    private LocalDateTime createdAt;    private LocalDateTime paidAt;
     private LocalDateTime shippedAt;
     private LocalDateTime deliveredAt;
+    private String stripePaymentIntentId;
 
     private List<OrderItemDetail> orderItems;
     private ShippingAddressInfo shippingAddress;
     private OrderEscrowSummary escrowSummary;
 
     private Map<String, List<OrderItemDetail>> itemsBySeller;
+    @Builder.Default
+    private Map<String, Object> metadata = new HashMap<>();
 
     @Data
     @Builder

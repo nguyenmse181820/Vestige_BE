@@ -9,13 +9,14 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
+
 @Data
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ProductDetailResponse {
-    private Long productId;
+public class ProductDetailResponse {    private Long productId;
     private String title;
+    private String slug;
     private String description;
     private BigDecimal price;
     private BigDecimal originalPrice;
@@ -30,17 +31,13 @@ public class ProductDetailResponse {
     private LocalDateTime updatedAt;
 
     private SellerInfo seller;
-
     private CategoryInfo category;
     private BrandInfo brand;
-
     private List<ProductImageInfo> images;
-
     private BigDecimal discountPercentage;
     private Boolean hasDiscount;
 
-    @Data
-    @Builder
+    @Data @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class SellerInfo {
@@ -56,8 +53,7 @@ public class ProductDetailResponse {
         private LocalDateTime joinedDate;
     }
 
-    @Data
-    @Builder
+    @Data @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class CategoryInfo {
@@ -66,8 +62,7 @@ public class ProductDetailResponse {
         private String description;
     }
 
-    @Data
-    @Builder
+    @Data @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class BrandInfo {
@@ -76,8 +71,7 @@ public class ProductDetailResponse {
         private String logoUrl;
     }
 
-    @Data
-    @Builder
+    @Data @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class ProductImageInfo {
@@ -85,5 +79,6 @@ public class ProductDetailResponse {
         private String imageUrl;
         private Boolean isPrimary;
         private Integer displayOrder;
+        private Boolean active;
     }
 }

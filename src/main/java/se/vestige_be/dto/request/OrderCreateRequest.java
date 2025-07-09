@@ -8,6 +8,7 @@ import lombok.AllArgsConstructor;
 import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
+import se.vestige_be.pojo.enums.PaymentMethod;
 
 import java.util.List;
 
@@ -22,6 +23,9 @@ public class OrderCreateRequest {
 
     @NotNull(message = "Shipping address ID is required")
     private Long shippingAddressId;
+
+    @NotNull(message = "Payment method is required")
+    private PaymentMethod paymentMethod;
 
     @Size(max = 500, message = "Notes cannot exceed 500 characters")
     private String notes;

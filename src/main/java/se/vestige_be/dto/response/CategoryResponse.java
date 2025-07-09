@@ -42,21 +42,46 @@ public class CategoryResponse {
                     .name(category.getName())
                     .build();
         }
-    }
+    }    public static CategoryResponse fromEntity(Category category, Integer level) {
+        // Safely access lazy-loaded collections
+        List<CategoryResponse> children = null;
+        boolean hasChildren = false;
+        int childrenCount = 0;
+        
+        try {
+            if (category.getSubcategories() != null) {
+                children = category.getSubcategories().stream()
+                        .map(child -> CategoryResponse.fromEntity(child, level + 1))
+                        .collect(Collectors.toList());
+                hasChildren = !category.getSubcategories().isEmpty();
+                childrenCount = category.getSubcategories().size();
+            }
+        } catch (Exception e) {
+            // Handle lazy loading exception gracefully
+            children = List.of();
+            hasChildren = false;
+            childrenCount = 0;
+        }
 
-    public static CategoryResponse fromEntity(Category category, Integer level) {
+        CategoryParentResponse parent = null;
+        try {
+            if (category.getParentCategory() != null) {
+                parent = CategoryParentResponse.fromEntity(category.getParentCategory());
+            }
+        } catch (Exception e) {
+            // Handle lazy loading exception gracefully
+            parent = null;
+        }
+
         return CategoryResponse.builder()
                 .categoryId(category.getCategoryId())
                 .name(category.getName())
                 .description(category.getDescription())
                 .createdAt(category.getCreatedAt())
-                .parent(category.getParentCategory() != null ?
-                        CategoryParentResponse.fromEntity(category.getParentCategory()) : null)
-                .children(category.getSubcategories().stream()
-                        .map(child -> CategoryResponse.fromEntity(child, level + 1))
-                        .collect(Collectors.toList()))
-                .hasChildren(!category.getSubcategories().isEmpty())
-                .childrenCount(category.getSubcategories().size())
+                .parent(parent)
+                .children(children)
+                .hasChildren(hasChildren)
+                .childrenCount(childrenCount)
                 .level(level)
                 .build();
     }
