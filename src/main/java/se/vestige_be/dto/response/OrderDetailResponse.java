@@ -26,7 +26,8 @@ public class OrderDetailResponse {
     private String notes;
     private Integer totalItems;
     private Integer uniqueSellers;
-    private LocalDateTime createdAt;    private LocalDateTime paidAt;
+    private LocalDateTime createdAt;
+    private LocalDateTime paidAt;
     private LocalDateTime shippedAt;
     private LocalDateTime deliveredAt;
     private String stripePaymentIntentId;
@@ -34,6 +35,7 @@ public class OrderDetailResponse {
     private List<OrderItemDetail> orderItems;
     private ShippingAddressInfo shippingAddress;
     private OrderEscrowSummary escrowSummary;
+    private BuyerInfo buyer;
 
     private Map<String, List<OrderItemDetail>> itemsBySeller;
     @Builder.Default
@@ -143,5 +145,18 @@ public class OrderDetailResponse {
         private BigDecimal sellerAmount;
         private String escrowStatus;
         private Integer itemCount;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BuyerInfo {
+        private Long userId;
+        private String username;
+        private String firstName;
+        private String lastName;
+        private String phoneNumber;
+        private String email;
     }
 }

@@ -10,6 +10,7 @@ import se.vestige_be.pojo.Order;
 import se.vestige_be.pojo.User;
 import se.vestige_be.pojo.enums.OrderStatus;
 
+import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
 
@@ -37,4 +38,20 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     List<Order> findByStatus(OrderStatus status);
 
     List<Order> findByBuyerAndCreatedAtAfter(User buyer, LocalDateTime createdAfter);
+    
+    // Add custom methods for user statistics
+    long countByBuyerUserId(Long buyerId);
+    long countByBuyerUserIdAndStatus(Long buyerId, OrderStatus status);
+    
+    @Query("SELECT COALESCE(SUM(o.totalAmount), 0) FROM Order o WHERE o.buyer.userId = :buyerId")
+    BigDecimal sumTotalAmountByBuyerUserId(@Param("buyerId") Long buyerId);
+    
+    @Query("SELECT MAX(o.createdAt) FROM Order o WHERE o.buyer.userId = :buyerId")
+    LocalDateTime findLastOrderDateByBuyerUserId(@Param("buyerId") Long buyerId);
+    
+    // Methods needed for admin user order summaries
+    List<Order> findByBuyerUserId(Long buyerId);
+    
+    // Methods needed for comprehensive statistics
+    List<Order> findByCreatedAtBetween(LocalDateTime startDate, LocalDateTime endDate);
 }

@@ -73,6 +73,13 @@ public class JWTTokenUtil {
         return createToken(claims, userDetails.getUsername(), jwtExpiration);
     }
 
+    // Generate refresh token
+    public String generateRefreshToken(UserDetails userDetails) {
+        Map<String, Object> claims = new HashMap<>();
+        claims.put("typ", "refresh");
+        return createToken(claims, userDetails.getUsername(), refreshExpiration);
+    }
+
     // Create token
     private String createToken(Map<String, Object> claims, String subject, long expiration) {
         return Jwts.builder()
@@ -82,6 +89,16 @@ public class JWTTokenUtil {
                 .expiration(new Date(System.currentTimeMillis() + expiration))
                 .signWith(getSigningKey(), Jwts.SIG.HS256)
                 .compact();
+    }
+
+    // Check if token is refresh token
+    public Boolean isRefreshToken(String token) {
+        try {
+            Claims claims = extractAllClaims(token);
+            return "refresh".equals(claims.get("typ"));
+        } catch (Exception e) {
+            return false;
+        }
     }
 
     // Validate token

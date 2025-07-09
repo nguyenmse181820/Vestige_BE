@@ -254,7 +254,7 @@ public class DataInitializer implements CommandLineRunner {
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .paymentMethod(PaymentMethod.STRIPE_CARD)
                         .totalAmount(iphone.getPrice())
-                        .status(OrderStatus.PAID).paidAt(LocalDateTime.now().minusDays(4)).createdAt(LocalDateTime.now().minusDays(4))
+                        .status(OrderStatus.PROCESSING).paidAt(LocalDateTime.now().minusDays(4)).createdAt(LocalDateTime.now().minusDays(4))
                         .build();
                 OrderItem item2_1 = OrderItem.builder().order(order2).product(iphone).seller(iphone.getSeller())
                         .price(iphone.getPrice()).platformFee(iphone.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
@@ -281,12 +281,12 @@ public class DataInitializer implements CommandLineRunner {
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .paymentMethod(PaymentMethod.COD)
                         .totalAmount(nikeHoodieJane.getPrice())
-                        .status(OrderStatus.SHIPPED).paidAt(LocalDateTime.now().minusDays(3)).shippedAt(LocalDateTime.now().minusDays(2))
+                        .status(OrderStatus.OUT_FOR_DELIVERY).paidAt(LocalDateTime.now().minusDays(3)).shippedAt(LocalDateTime.now().minusDays(2))
                         .createdAt(LocalDateTime.now().minusDays(3))
                         .build();
                 OrderItem item3_1 = OrderItem.builder().order(order3).product(nikeHoodieJane).seller(nikeHoodieJane.getSeller())
                         .price(nikeHoodieJane.getPrice()).platformFee(nikeHoodieJane.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
-                        .feePercentage(feePercentage).status(OrderItemStatus.SHIPPED).escrowStatus(EscrowStatus.HOLDING)
+                        .feePercentage(feePercentage).status(OrderItemStatus.OUT_FOR_DELIVERY).escrowStatus(EscrowStatus.HOLDING)
                         .build();
                 order3.setOrderItems(List.of(item3_1));
                 nikeHoodieJane.setStatus(ProductStatus.SOLD);

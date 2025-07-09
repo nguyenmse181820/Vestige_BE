@@ -298,7 +298,7 @@ public class StripePaymentService {
 
             // Update order
             Order order = transaction.getOrderItem().getOrder();
-            order.setStatus(OrderStatus.PAID);
+            order.setStatus(OrderStatus.PROCESSING);
             order.setPaidAt(LocalDateTime.now());
             orderRepository.save(order);
 

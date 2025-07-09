@@ -605,4 +605,43 @@ public class StripeService {
         // Other countries use full agreement (card payments + transfers)
         return "full";
     }
+
+    /**
+     * Transfer funds to a seller's Stripe account
+     * 
+     * @param amount The amount to transfer in the base currency
+     * @param destinationAccountId The Stripe account ID of the seller
+     * @param transactionId The transaction ID for tracking
+     * @return The Stripe Transfer ID
+     * @throws StripeException If the transfer fails
+     */
+    public String transferToSeller(BigDecimal amount, String destinationAccountId, Long transactionId) throws StripeException {
+        try {
+            // Convert amount to cents (or smallest currency unit)
+            long amountInSmallestUnit = amount.longValue();
+            
+            Map<String, Object> params = new HashMap<>();
+            params.put("amount", amountInSmallestUnit);
+            params.put("currency", currency);
+            params.put("destination", destinationAccountId);
+            params.put("transfer_group", "TRANSACTION_" + transactionId);
+            
+            // Add metadata for tracking
+            Map<String, String> metadata = new HashMap<>();
+            metadata.put("transaction_id", transactionId.toString());
+            metadata.put("platform", "vestige");
+            metadata.put("type", "seller_payout");
+            params.put("metadata", metadata);
+            
+            Transfer transfer = Transfer.create(params);
+            log.info("Created transfer {} to account {} for amount {} {} (transaction {})",
+                    transfer.getId(), destinationAccountId, amountInSmallestUnit, currency, transactionId);
+            
+            return transfer.getId();
+        } catch (StripeException e) {
+            log.error("Failed to transfer funds to seller account {}: {} (transaction {})",
+                    destinationAccountId, e.getMessage(), transactionId);
+            throw e;
+        }
+    }
 }

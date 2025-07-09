@@ -34,6 +34,10 @@ public class User {
     @JsonIgnore
     private String passwordHash;
 
+    public void setPassword(String password) {
+        this.passwordHash = password;
+    }
+
     @Column(length = 50)
     private String firstName;
 
@@ -77,6 +81,24 @@ public class User {
     @Column(length = 20)
     @Builder.Default
     private String accountStatus = "active";
+
+    /**
+     * Sets whether the account is active or inactive
+     *
+     * @param isActive true to set status to "active", false to set status to "inactive"
+     */
+    public void setIsActive(Boolean isActive) {
+        this.accountStatus = isActive ? "active" : "inactive";
+    }
+
+    /**
+     * Checks if the account is active
+     *
+     * @return true if account status is "active", false otherwise
+     */
+    public Boolean getIsActive() {
+        return "active".equals(this.accountStatus);
+    }
 
     @Column(precision = 3, scale = 2)
     @Builder.Default

@@ -50,4 +50,12 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     
     // Admin methods for statistics
     List<OrderItem> findByStatus(OrderItemStatus status);
+    
+    // Methods for admin order summaries
+    List<OrderItem> findBySellerUserId(Long sellerId);
+    
+    // Method for finding order items by order creation date range (for trend analysis)
+    @Query("SELECT oi FROM OrderItem oi WHERE oi.order.createdAt BETWEEN :startDate AND :endDate")
+    List<OrderItem> findByOrderCreatedAtBetween(@Param("startDate") java.time.LocalDateTime startDate, 
+                                               @Param("endDate") java.time.LocalDateTime endDate);
 }
