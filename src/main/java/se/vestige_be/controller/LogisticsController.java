@@ -13,6 +13,7 @@ import org.springframework.http.ResponseEntity;
 import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.web.bind.annotation.*;
 import se.vestige_be.dto.request.ConfirmPickupRequest;
+import se.vestige_be.dto.request.ConfirmDeliveryRequest;
 import se.vestige_be.dto.response.ApiResponse;
 import se.vestige_be.dto.response.OrderDetailResponse;
 
@@ -147,13 +148,13 @@ public class LogisticsController {
     }
 
     @Operation(
-            summary = "Confirm final delivery",
-            description = "Confirm that an item has been successfully delivered to the buyer. Triggers escrow release."
+            summary = "Confirm final delivery with photo evidence",
+            description = "Confirm that an item has been successfully delivered to the buyer. Requires photo evidence and triggers escrow release."
     )
     @ApiResponses(value = {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "200",
-                    description = "Delivery confirmed successfully",
+                    description = "Delivery confirmed successfully with photo evidence",
                     content = @Content(schema = @Schema(implementation = OrderDetailResponse.class))
             ),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -177,12 +178,13 @@ public class LogisticsController {
     @PostMapping("/items/{itemId}/confirm-delivery")
     public ResponseEntity<ApiResponse<OrderDetailResponse>> confirmDelivery(
             @Parameter(description = "Order item ID", required = true, example = "1")
-            @PathVariable Long itemId) {
-        
-        OrderDetailResponse order = logisticsService.confirmDelivery(itemId);
-        
+            @PathVariable Long itemId,
+            @RequestBody ConfirmDeliveryRequest request) {
+
+        OrderDetailResponse order = logisticsService.confirmDelivery(itemId, request.getPhotoUrls());
+
         return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
-                .message("Delivery confirmed successfully")
+                .message("Delivery confirmed successfully with " + request.getPhotoUrls().size() + " evidence photos.")
                 .data(order)
                 .build());
     }

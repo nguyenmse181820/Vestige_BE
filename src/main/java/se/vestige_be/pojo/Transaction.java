@@ -104,4 +104,9 @@ public class Transaction {
     @Builder.Default
     @ToString.Exclude
     private List<PickupEvidence> pickupEvidence = new ArrayList<>();
+
+    @OneToMany(mappedBy = "transaction", cascade = CascadeType.ALL, orphanRemoval = true)
+    @Builder.Default
+    @ToString.Exclude
+    private List<DeliveryEvidence> deliveryEvidence = new ArrayList<>();
 }

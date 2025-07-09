@@ -13,15 +13,18 @@ import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.pojo.Order;
 import se.vestige_be.pojo.OrderItem;
 import se.vestige_be.pojo.PickupEvidence;
+import se.vestige_be.pojo.DeliveryEvidence;
 import se.vestige_be.pojo.Transaction;
 import se.vestige_be.pojo.enums.OrderItemStatus;
 import se.vestige_be.repository.OrderItemRepository;
 import se.vestige_be.repository.OrderRepository;
 import se.vestige_be.repository.PickupEvidenceRepository;
+import se.vestige_be.repository.DeliveryEvidenceRepository;
 import se.vestige_be.repository.TransactionRepository;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.ArrayList;
 
 @Service
 @RequiredArgsConstructor
@@ -33,6 +36,7 @@ public class LogisticsService {
     private final OrderRepository orderRepository;
     private final TransactionRepository transactionRepository;
     private final PickupEvidenceRepository pickupEvidenceRepository;
+    private final DeliveryEvidenceRepository deliveryEvidenceRepository;
     private final EscrowService escrowService;
     private final OrderService orderService;
     private final StatusHistoryService statusHistoryService;
@@ -134,41 +138,64 @@ public class LogisticsService {
     }
 
     @Transactional
-    public OrderDetailResponse confirmDelivery(Long itemId) {
-        log.info("Confirming delivery for item: {}", itemId);
-        
+    public OrderDetailResponse confirmDelivery(Long itemId, List<String> photoUrls) {
+        log.info("Confirming delivery for item: {} with {} photo URLs", itemId, photoUrls.size());
+
+        if (photoUrls == null || photoUrls.isEmpty()) {
+            throw new BusinessLogicException("At least one photo URL is required as proof of delivery.");
+        }
+
         OrderItem orderItem = orderItemRepository.findById(itemId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order item not found: " + itemId));
 
-        // Validate current status
         if (orderItem.getStatus() != OrderItemStatus.OUT_FOR_DELIVERY) {
             throw new BusinessLogicException("Item must be in OUT_FOR_DELIVERY status to confirm delivery. Current status: " + orderItem.getStatus());
         }
 
-        // Change status to DELIVERED
         orderItem.setStatus(OrderItemStatus.DELIVERED);
 
-        // Record status change in history
+        Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
+        transaction.setDeliveredAt(LocalDateTime.now());
+
+        // 1. Get the existing list from the managed entity
+        List<DeliveryEvidence> evidenceList = transaction.getDeliveryEvidence();
+        if (evidenceList == null) { // Defensive check, though @Builder.Default should prevent this
+            evidenceList = new ArrayList<>();
+            transaction.setDeliveryEvidence(evidenceList);
+        }
+
+        // 2. Clear the existing list (Hibernate will track removals)
+        evidenceList.clear();
+
+        // 3. Create and add the new evidence to the SAME list instance
+        for (String url : photoUrls) {
+            DeliveryEvidence evidence = DeliveryEvidence.builder()
+                    .transaction(transaction)
+                    .imageUrl(url)
+                    .uploadedAt(LocalDateTime.now())
+                    .build();
+            evidenceList.add(evidence);
+        }
+
         statusHistoryService.recordStatusChange(
-            orderItem, 
-            OrderItemStatus.DELIVERED, 
-            getCurrentUsername(), 
-            "Item successfully delivered to buyer. Escrow funds released to seller."
+                orderItem,
+                OrderItemStatus.DELIVERED,
+                getCurrentUsername(),
+                "Item successfully delivered to buyer. " + photoUrls.size() + " evidence photos recorded."
         );
+
+        // Save entities
+        transactionRepository.save(transaction); // Saving the parent will cascade to the children
         orderItemRepository.save(orderItem);
 
-        // Set deliveredAt timestamp on the parent order
         Order order = orderItem.getOrder();
         order.setDeliveredAt(LocalDateTime.now());
-
-        // Release escrow funds for the seller
-        escrowService.releaseEscrowFunds(orderItem, "Item delivered by Vestige Shipping");
-
-        // Update overall order status and return response
         updateOverallOrderStatus(order);
         orderRepository.save(order);
 
-        log.info("Delivery confirmed for item {}. Escrow funds released.", itemId);
+        escrowService.releaseEscrowFunds(orderItem, "Item delivered by Vestige Shipping with photo proof.");
+
+        log.info("Delivery confirmed for item {}. Saved {} evidence photos. Escrow funds released.", itemId, photoUrls.size());
         return convertToDetailResponse(order);
     }
 
