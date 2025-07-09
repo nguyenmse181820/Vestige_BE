@@ -4,7 +4,9 @@ import jakarta.persistence.criteria.Predicate;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.data.domain.Page;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
+import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -27,7 +29,9 @@ import se.vestige_be.repository.CategoryRepository;
 import se.vestige_be.repository.ProductImageRepository;
 import se.vestige_be.repository.ProductRepository;
 import se.vestige_be.repository.UserRepository;
+import se.vestige_be.repository.ProductLikeRepository;
 import se.vestige_be.util.PaginationUtils;
+import se.vestige_be.util.SlugUtils;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
@@ -49,11 +53,20 @@ public class ProductService {
     private final CategoryRepository categoryRepository;
     private final BrandRepository brandRepository;
     private final ProductImageRepository productImageRepository;
+    private final ProductLikeRepository productLikeRepository;
 
     public Page<ProductListResponse> getProducts(ProductFilterResponse filterDto, Pageable pageable) {
         Specification<Product> spec = buildProductSpecification(filterDto);
         Page<Product> products = productRepository.findAll(spec, pageable);
         return products.map(this::convertToListResponse);
+    }
+
+    @Transactional(readOnly = true)
+    public List<ProductListResponse> getTopViewedProducts(int limit) {
+        // Create pageable for top N products by viewsCount
+        PageRequest pageRequest = PageRequest.of(0, limit, Sort.by(Sort.Direction.DESC, "viewsCount"));
+        Page<Product> page = productRepository.findByStatus(ProductStatus.ACTIVE, pageRequest);
+        return page.map(this::convertToListResponse).getContent();
     }
 
     public PagedResponse<ProductListResponse> getAllProductsWithAnyStatus(
@@ -148,18 +161,21 @@ public class ProductService {
                 .orElseThrow(() -> new ResourceNotFoundException("Category not found with ID: " + request.getCategoryId()));
 
         Brand brand = brandRepository.findById(request.getBrandId())
-                .orElseThrow(() -> new ResourceNotFoundException("Brand not found with ID: " + request.getBrandId()));
-
-        if (request.getOriginalPrice() != null && request.getPrice() != null &&
+                .orElseThrow(() -> new ResourceNotFoundException("Brand not found with ID: " + request.getBrandId()));        if (request.getOriginalPrice() != null && request.getPrice() != null &&
                 request.getOriginalPrice().compareTo(request.getPrice()) < 0) {
             throw new BusinessLogicException("Original price must be greater than or equal to current price.");
-        }
+        }        // Generate unique slug with meaningful context
+        String slug = generateMeaningfulSlug(request.getTitle(), brand.getName(), seller.getUsername(),
+                                            request.getCondition(), request.getColor(), request.getSize());
+        
+        log.debug("Generated slug '{}' for product title '{}' by seller '{}'", slug, request.getTitle(), seller.getUsername());
 
         Product product = Product.builder()
                 .seller(seller)
                 .category(category)
                 .brand(brand)
                 .title(request.getTitle())
+                .slug(slug)
                 .description(request.getDescription())
                 .price(request.getPrice())
                 .originalPrice(request.getOriginalPrice())
@@ -375,6 +391,14 @@ public class ProductService {
             if (request.getDisplayOrder() == null) {
                 throw new BusinessLogicException("Display order is required for adding a new image.");
             }
+            checkDuplicateDisplayOrder(product.getProductId(), request.getDisplayOrder(), null);
+            // If primary image is being deactivated, activate the next one in order
+            if (Boolean.FALSE.equals(request.getIsPrimary())) {
+                product.getImages().stream()
+                        .filter(img -> Boolean.TRUE.equals(img.getActive()) && !img.getImageId().equals(request.getImageId()))
+                        .findFirst()
+                        .ifPresent(img -> img.setIsPrimary(true));
+            }
 
             if (Boolean.TRUE.equals(request.getIsPrimary())) {
                 product.getImages().forEach(img -> img.setIsPrimary(false));
@@ -473,10 +497,21 @@ public class ProductService {
             }
         };
     }
-
-
     private Specification<Product> hasCategoryId(Long categoryId) {
-        return (root, query, criteriaBuilder) -> categoryId == null ? null : criteriaBuilder.equal(root.get("category").get("categoryId"), categoryId);
+        return (root, query, criteriaBuilder) -> {
+            if (categoryId == null) return null;
+            
+            // Get all category IDs including subcategories for hierarchical filtering
+            List<Long> categoryIds = categoryRepository.findCategoryIdWithAllSubcategoryIds(categoryId);
+            
+            if (categoryIds.isEmpty()) {
+                // If no subcategories found, just filter by the original category
+                return criteriaBuilder.equal(root.get("category").get("categoryId"), categoryId);
+            } else {
+                // Filter by any of the category IDs (parent + all subcategories)
+                return root.get("category").get("categoryId").in(categoryIds);
+            }
+        };
     }
 
     private Specification<Product> hasBrandId(Long brandId) {
@@ -520,11 +555,10 @@ public class ProductService {
             discountPercentage = product.getOriginalPrice().subtract(product.getPrice())
                     .multiply(BigDecimal.valueOf(100))
                     .divide(product.getOriginalPrice(), 2, RoundingMode.HALF_UP);
-        }
-
-        return ProductListResponse.builder()
+        }        return ProductListResponse.builder()
                 .productId(product.getProductId())
                 .title(product.getTitle())
+                .slug(product.getSlug())
                 .description(product.getDescription())
                 .price(product.getPrice())
                 .originalPrice(product.getOriginalPrice())
@@ -568,11 +602,10 @@ public class ProductService {
                         .displayOrder(img.getDisplayOrder())
                         .active(img.getActive())
                         .build())
-                .collect(Collectors.toList());
-
-        return ProductDetailResponse.builder()
+                .collect(Collectors.toList());        return ProductDetailResponse.builder()
                 .productId(product.getProductId())
                 .title(product.getTitle())
+                .slug(product.getSlug())
                 .description(product.getDescription())
                 .price(product.getPrice())
                 .originalPrice(product.getOriginalPrice())
@@ -739,10 +772,7 @@ public class ProductService {
                 .pagination(pagination)
                 .build();
     }
-
-    /**
-     * Admin-only method to delete any product
-     */    @Transactional
+    @Transactional
     public void deleteProductAsAdmin(Long productId, Long adminId) {
         Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
@@ -756,16 +786,152 @@ public class ProductService {
         productRepository.save(product);
 
         log.info("Admin {} successfully deleted product {}", adminId, productId);
-    }    /**
-     * Admin-only method to manage images on any product
-     */    @Transactional
+    }
+
+    @Transactional
     public ProductDetailResponse manageProductImageAsAdmin(Long productId, ProductImageRequest request, Long adminId) {
         Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));log.info("Admin {} managing images for product {} owned by seller {}", 
                 adminId, productId, product.getSeller().getUserId());
 
-        // Admin can manage images on any product - reuse existing logic
         return processImageManagement(product, request);
     }
 
+    private String generateMeaningfulSlug(String title, String brandName, String sellerUsername,
+                                        ProductCondition condition, String color, String size) {
+        // Ensure we have at least a title to work with
+        if (title == null || title.trim().isEmpty()) {
+            title = "product";
+        }
+        if (brandName == null || brandName.trim().isEmpty()) {
+            brandName = "brand";
+        }
+        if (sellerUsername == null || sellerUsername.trim().isEmpty()) {
+            sellerUsername = "seller";
+        }
+        
+        String baseSlug = SlugUtils.generateProfessionalProductSlug(
+            brandName,
+            title, 
+            color, 
+            size,
+            condition != null ? condition.name() : null
+        );
+        
+        log.debug("Generated base slug: '{}' from title: '{}', brand: '{}'", baseSlug, title, brandName);
+
+        if (!productRepository.existsBySlug(baseSlug)) {
+            log.debug("Base slug '{}' is available", baseSlug);
+            return baseSlug;
+        }
+
+        log.debug("Base slug '{}' already exists, checking for multiple sellers", baseSlug);
+        boolean hasMultipleSellers = productRepository.hasMultipleSellersForSlug(baseSlug);
+        
+        if (hasMultipleSellers) {
+            String sellerSlug = baseSlug + "-by-" + SlugUtils.generateSlug(sellerUsername);
+            log.debug("Multiple sellers detected, trying seller-specific slug: '{}'", sellerSlug);
+
+            if (!productRepository.existsBySlug(sellerSlug)) {
+                return sellerSlug;
+            }
+
+            int counter = 2;
+            String numberedSellerSlug;
+            do {
+                numberedSellerSlug = sellerSlug + "-" + counter;
+                counter++;
+            } while (productRepository.existsBySlug(numberedSellerSlug) && counter < 100);
+            
+            log.debug("Final numbered seller slug: '{}'", numberedSellerSlug);
+            return numberedSellerSlug;
+        } else {
+            int counter = 2;
+            String numberedSlug;
+            do {
+                numberedSlug = baseSlug + "-" + counter;
+                counter++;
+            } while (productRepository.existsBySlug(numberedSlug) && counter < 100);
+            
+            log.debug("Final numbered slug: '{}'", numberedSlug);
+            return numberedSlug;
+        }
+    }
+    @Transactional(readOnly = true)
+    public ProductDetailResponse getProductBySlug(String slug) {
+        Product product = productRepository.findBySlugWithRelations(slug)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with slug: " + slug));
+        
+        // Increment view count
+        product.setViewsCount(product.getViewsCount() + 1);
+        productRepository.save(product);
+        
+        return convertToDetailResponse(product);
+    }
+
+    @Transactional(readOnly = true)
+    public boolean isSlugAvailable(String slug) {
+        return !productRepository.existsBySlug(slug);
+    }
+    
+    /**
+     * Preview what slug would be generated for a product
+     */
+    @Transactional(readOnly = true)
+    public String previewProductSlug(String title, String brandName, String sellerUsername,
+                                    ProductCondition condition, String color, String size) {
+        return generateMeaningfulSlug(title, brandName, sellerUsername, condition, color, size);
+    }
+
+    private void checkDuplicateDisplayOrder(Long productId, Integer displayOrder, Long excludeImageId) {
+        if (productImageRepository.existsByProductIdAndDisplayOrderAndActiveTrue(productId, displayOrder, excludeImageId)) {
+            throw new BusinessLogicException("Display order is already used by another active image for this product.");
+        }
+    }
+    @Transactional
+    public void deleteProductImage(Long productId, Long imageId, User user) {
+        Product product = productRepository.findByIdWithRelations(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
+        boolean isOwner = product.getSeller().getUserId().equals(user.getUserId());
+        boolean isAdmin = user.getRole() != null && user.getRole().getName().contains("ADMIN");
+        if (!isOwner && !isAdmin) {
+            throw new UnauthorizedException("You are not authorized to delete images for this product.");
+        }
+        ProductImage image = product.getImages().stream()
+                .filter(img -> img.getImageId().equals(imageId))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Image not found with ID: " + imageId + " for this product."));
+        product.getImages().remove(image);
+        productImageRepository.delete(image);
+    }
+
+    @Transactional
+    public boolean likeProduct(Long userId, Long productId) {
+        if (productLikeRepository.findByUserUserIdAndProductProductId(userId, productId).isPresent()) {
+            return false;
+        }
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with ID: " + userId));
+        ProductLike like = ProductLike.builder().user(user).product(product).build();
+        productLikeRepository.save(like);
+        product.setLikesCount(product.getLikesCount() + 1);
+        productRepository.save(product);
+        return true;
+    }
+
+    @Transactional
+    public boolean unlikeProduct(Long userId, Long productId) {
+        var likeOpt = productLikeRepository.findByUserUserIdAndProductProductId(userId, productId);
+        if (likeOpt.isEmpty()) {
+            return false;
+        }
+        productLikeRepository.deleteByUserUserIdAndProductProductId(userId, productId);
+        Product product = productRepository.findById(productId)
+                .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
+        product.setLikesCount(Math.max(0, product.getLikesCount() - 1));
+        productRepository.save(product);
+        return true;
+    }
 }

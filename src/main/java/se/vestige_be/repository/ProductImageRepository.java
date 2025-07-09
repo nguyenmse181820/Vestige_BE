@@ -5,6 +5,6 @@ import se.vestige_be.pojo.ProductImage;
 
 import java.util.List;
 
-public interface ProductImageRepository extends JpaRepository<ProductImage, Integer> {
+public interface ProductImageRepository extends JpaRepository<ProductImage, Integer>, ProductImageRepositoryCustom {
     List<ProductImage> findByProductProductIdAndActiveTrueOrderByDisplayOrderAsc(Long productId);
 }

@@ -135,4 +135,42 @@ public class CategoryService {
         return false;
     }
 
+    /**
+     * Get all category IDs including the specified category and all its descendants
+     * This is useful for hierarchical filtering where selecting a parent category 
+     * should include products from all child categories
+     */
+    @Transactional(readOnly = true)
+    public List<Long> getCategoryWithAllSubcategoryIds(Long categoryId) {
+        if (categoryId == null) {
+            return List.of();
+        }
+        
+        return categoryRepository.findCategoryIdWithAllSubcategoryIds(categoryId);
+    }
+    
+    /**
+     * Check if a category has subcategories
+     * This helps the frontend determine if a category can be expanded
+     */
+    @Transactional(readOnly = true)
+    public boolean hasSubcategories(Long categoryId) {
+        if (categoryId == null) {
+            return false;
+        }
+        
+        return categoryRepository.hasSubcategories(categoryId);
+    }
+      /**
+     * Get category tree for display purposes
+     * Returns the category with all its subcategories loaded
+     */
+    @Transactional(readOnly = true)
+    public CategoryResponse getCategoryTree(Long categoryId) {
+        Category category = categoryRepository.findByIdWithSubcategories(categoryId)
+                .orElseThrow(() -> new EntityNotFoundException("Category not found with id: " + categoryId));
+        
+        return CategoryResponse.fromEntity(category, 0);
+    }
+
 }

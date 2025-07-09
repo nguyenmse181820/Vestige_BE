@@ -12,9 +12,9 @@ import java.time.LocalDateTime;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ProductListResponse {
-    private Long productId;
+public class ProductListResponse {    private Long productId;
     private String title;
+    private String slug;
     private String description;
     private BigDecimal price;
     private BigDecimal originalPrice;

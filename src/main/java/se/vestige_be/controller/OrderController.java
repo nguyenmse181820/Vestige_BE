@@ -41,7 +41,9 @@ import java.util.Map;
                    "Includes buyer/seller workflow management and comprehensive order lifecycle handling.")
 @RequiredArgsConstructor
 @Slf4j
-public class OrderController {    private final OrderService orderService;
+public class OrderController {
+
+    private final OrderService orderService;
     private final UserService userService;
 
     @Operation(
@@ -145,7 +147,8 @@ public class OrderController {    private final OrderService orderService;
         return ResponseEntity.ok(ApiResponse.<PagedResponse<OrderListResponse>>builder()
                 .message("Orders retrieved successfully")
                 .data(orders)
-                .build());    }
+                .build());
+    }
 
     @Operation(
             summary = "Get order details by ID",
@@ -621,30 +624,6 @@ public class OrderController {    private final OrderService orderService;
     }
 
     @Operation(
-            summary = "[ADMIN] Get system-wide order statistics",
-            description = "Admin-only endpoint to retrieve comprehensive order statistics for the entire system including revenue, order counts, and performance metrics."
-    )
-    @ApiResponses(value = {
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "200",
-                    description = "System statistics retrieved successfully"
-            ),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "403",
-                    description = "Access denied - Admin role required"
-            )
-    })
-    @SecurityRequirement(name = "bearerAuth")
-    @GetMapping("/admin/stats")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<Object>> getSystemOrderStats() {
-        return ResponseEntity.ok(ApiResponse.builder()
-                .message("System order statistics retrieved successfully")
-                .data(orderService.getSystemOrderStats())
-                .build());
-    }
-
-    @Operation(
             summary = "[ADMIN] Reconcile stuck orders",
             description = "Admin-only endpoint to trigger reconciliation of pending orders that may be stuck due to payment processing issues."
     )
@@ -822,6 +801,257 @@ public class OrderController {    private final OrderService orderService;
         
         return ResponseEntity.ok(ApiResponse.<String>builder()
                 .message("Failed payments cleanup completed successfully by admin")
+                .build());
+    }
+
+    // ==================== ADMIN DASHBOARD ENDPOINTS ====================
+
+    @Operation(
+            summary = "[ADMIN] Get system-wide order statistics",
+            description = "Get comprehensive statistics for admin dashboard including order counts, revenue, platform fees, and breakdowns by status."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "Statistics retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = ApiResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "403",
+                    description = "Access denied - Admin role required"
+            )
+    })
+    @GetMapping("/admin/statistics")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Object>> getSystemOrderStats() {
+        log.info("Admin retrieving system order statistics");
+        
+        Object stats = orderService.getSystemOrderStats();
+        
+        return ResponseEntity.ok(ApiResponse.builder()
+                .message("System order statistics retrieved successfully")
+                .data(stats)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Get transaction analytics",
+            description = "Get detailed transaction analytics including escrow status distribution, transaction volumes, and payment methods breakdown."
+    )
+    @GetMapping("/admin/transactions/analytics")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Object>> getTransactionAnalytics(
+            @Parameter(description = "Start date (YYYY-MM-DD)") @RequestParam(required = false) String startDate,
+            @Parameter(description = "End date (YYYY-MM-DD)") @RequestParam(required = false) String endDate
+    ) {
+        log.info("Admin retrieving transaction analytics: startDate={}, endDate={}", startDate, endDate);
+        
+        LocalDateTime start = startDate != null ? orderService.parseDateTime(startDate) : null;
+        LocalDateTime end = endDate != null ? orderService.parseDateTime(endDate) : null;
+        
+        Object analytics = orderService.getTransactionAnalytics(start, end);
+        
+        return ResponseEntity.ok(ApiResponse.builder()
+                .message("Transaction analytics retrieved successfully")
+                .data(analytics)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Get all transactions with filtering",
+            description = "Get paginated list of all transactions with comprehensive filtering options for admin dashboard."
+    )
+    @GetMapping("/admin/transactions")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PagedResponse<Object>>> getAllTransactions(
+            @Parameter(description = "Transaction status filter") @RequestParam(required = false) String status,
+            @Parameter(description = "Escrow status filter") @RequestParam(required = false) String escrowStatus,
+            @Parameter(description = "Buyer ID filter") @RequestParam(required = false) Long buyerId,
+            @Parameter(description = "Seller ID filter") @RequestParam(required = false) Long sellerId,
+            @Parameter(description = "Start date (YYYY-MM-DD)") @RequestParam(required = false) String startDate,
+            @Parameter(description = "End date (YYYY-MM-DD)") @RequestParam(required = false) String endDate,
+            @Parameter(description = "Search term") @RequestParam(required = false) String search,
+            Pageable pageable
+    ) {
+        log.info("Admin retrieving all transactions with filters");
+        
+        LocalDateTime start = startDate != null ? orderService.parseDateTime(startDate) : null;
+        LocalDateTime end = endDate != null ? orderService.parseDateTime(endDate) : null;
+        
+        PagedResponse<Object> transactions = orderService.getAllTransactionsForAdmin(
+                status, escrowStatus, buyerId, sellerId, start, end, search, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.<PagedResponse<Object>>builder()
+                .message("Transactions retrieved successfully")
+                .data(transactions)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Get problem transactions",
+            description = "Get transactions that require admin attention (disputes, failed transfers, stuck escrows, etc.)"
+    )
+    @GetMapping("/admin/transactions/problems")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Object>> getProblemTransactions() {
+        log.info("Admin retrieving problem transactions");
+        
+        Object problemTransactions = orderService.getProblemTransactions();
+        
+        return ResponseEntity.ok(ApiResponse.builder()
+                .message("Problem transactions retrieved successfully")
+                .data(problemTransactions)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Force release escrow",
+            description = "Manually release funds from escrow to seller for a specific transaction."
+    )
+    @PostMapping("/admin/transactions/{transactionId}/release-escrow")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<String>> forceReleaseEscrow(
+            @Parameter(description = "Transaction ID") @PathVariable Long transactionId,
+            @Parameter(description = "Admin notes for the action") @RequestParam(required = false) String notes,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        log.info("Admin force releasing escrow for transaction: {}", transactionId);
+        
+        User admin = userService.findByUsername(userDetails.getUsername());
+        orderService.forceReleaseEscrow(transactionId, notes, admin.getUserId());
+        
+        return ResponseEntity.ok(ApiResponse.<String>builder()
+                .message("Escrow released successfully by admin")
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Get revenue analytics",
+            description = "Get detailed revenue analytics including daily/monthly breakdowns, platform fees, and trend analysis."
+    )
+    @GetMapping("/admin/analytics/revenue")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Object>> getRevenueAnalytics(
+            @Parameter(description = "Period: daily, weekly, monthly") @RequestParam(defaultValue = "monthly") String period,
+            @Parameter(description = "Number of periods to include") @RequestParam(defaultValue = "12") int periods
+    ) {
+        log.info("Admin retrieving revenue analytics: period={}, periods={}", period, periods);
+        
+        Object analytics = orderService.getRevenueAnalytics(period, periods);
+        
+        return ResponseEntity.ok(ApiResponse.builder()
+                .message("Revenue analytics retrieved successfully")
+                .data(analytics)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Get seller performance metrics",
+            description = "Get comprehensive seller performance metrics including sales volume, success rates, and dispute counts."
+    )
+    @GetMapping("/admin/analytics/sellers")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PagedResponse<Object>>> getSellerPerformanceMetrics(
+            @Parameter(description = "Sort by: sales_volume, success_rate, dispute_rate") @RequestParam(defaultValue = "sales_volume") String sortBy,
+            @Parameter(description = "Time period in days") @RequestParam(defaultValue = "30") int days,
+            Pageable pageable
+    ) {
+        log.info("Admin retrieving seller performance metrics");
+        
+        PagedResponse<Object> metrics = orderService.getSellerPerformanceMetrics(sortBy, days, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.<PagedResponse<Object>>builder()
+                .message("Seller performance metrics retrieved successfully")
+                .data(metrics)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Get buyer behavior analytics",
+            description = "Get buyer behavior analytics including purchase patterns, return rates, and value metrics."
+    )
+    @GetMapping("/admin/analytics/buyers")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<PagedResponse<Object>>> getBuyerBehaviorAnalytics(
+            @Parameter(description = "Sort by: total_spent, order_count, avg_order_value") @RequestParam(defaultValue = "total_spent") String sortBy,
+            @Parameter(description = "Time period in days") @RequestParam(defaultValue = "30") int days,
+            Pageable pageable
+    ) {
+        log.info("Admin retrieving buyer behavior analytics");
+        
+        PagedResponse<Object> analytics = orderService.getBuyerBehaviorAnalytics(sortBy, days, pageable);
+        
+        return ResponseEntity.ok(ApiResponse.<PagedResponse<Object>>builder()
+                .message("Buyer behavior analytics retrieved successfully")
+                .data(analytics)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Export order data",
+            description = "Export order data in CSV format with specified filters for external analysis."
+    )
+    @GetMapping("/admin/orders/export")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<byte[]> exportOrderData(
+            @Parameter(description = "Order status filter") @RequestParam(required = false) String status,
+            @Parameter(description = "Start date (YYYY-MM-DD)") @RequestParam(required = false) String startDate,
+            @Parameter(description = "End date (YYYY-MM-DD)") @RequestParam(required = false) String endDate,
+            @Parameter(description = "Export format: csv, excel") @RequestParam(defaultValue = "csv") String format
+    ) {
+        log.info("Admin exporting order data: format={}, status={}", format, status);
+        
+        LocalDateTime start = startDate != null ? orderService.parseDateTime(startDate) : null;
+        LocalDateTime end = endDate != null ? orderService.parseDateTime(endDate) : null;
+        
+        byte[] exportData = orderService.exportOrderData(status, start, end, format);
+        
+        String filename = "orders_export_" + LocalDateTime.now().toString().replace(":", "-") + "." + format;
+        String contentType = format.equals("excel") ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/csv";
+        
+        return ResponseEntity.ok()
+                .header("Content-Disposition", "attachment; filename=" + filename)
+                .header("Content-Type", contentType)
+                .body(exportData);
+    }
+
+    @Operation(
+            summary = "[ADMIN] Bulk update order statuses",
+            description = "Update multiple orders' statuses in bulk operation."
+    )
+    @PatchMapping("/admin/orders/bulk-update")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Object>> bulkUpdateOrderStatuses(
+            @RequestBody Map<String, Object> request,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        log.info("Admin performing bulk order status update");
+        
+        User admin = userService.findByUsername(userDetails.getUsername());
+        Object result = orderService.bulkUpdateOrderStatuses(request, admin.getUserId());
+        
+        return ResponseEntity.ok(ApiResponse.builder()
+                .message("Bulk order status update completed")
+                .data(result)
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Get order lifecycle timeline",
+            description = "Get detailed timeline of all events for a specific order for debugging and analysis."
+    )
+    @GetMapping("/admin/orders/{orderId}/timeline")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<Object>> getOrderTimeline(
+            @Parameter(description = "Order ID") @PathVariable Long orderId
+    ) {
+        log.info("Admin retrieving order timeline for order: {}", orderId);
+        
+        Object timeline = orderService.getOrderTimeline(orderId);
+        
+        return ResponseEntity.ok(ApiResponse.builder()
+                .message("Order timeline retrieved successfully")
+                .data(timeline)
                 .build());
     }
 }

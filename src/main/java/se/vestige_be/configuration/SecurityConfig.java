@@ -3,6 +3,7 @@ package se.vestige_be.configuration;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.context.annotation.Lazy;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.AuthenticationProvider;
 import org.springframework.security.authentication.dao.DaoAuthenticationProvider;
@@ -52,12 +53,10 @@ public class SecurityConfig {
                 .authorizeHttpRequests(auth -> auth
                         // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/stripe/webhook").permitAll()
-
-                        // Public API endpoints (can be accessed without authentication)
+                        .requestMatchers("/api/stripe/webhook").permitAll()                        // Public API endpoints (can be accessed without authentication)
                         .requestMatchers("/api/products/**").permitAll()
-                        .requestMatchers("/api/categories/**").permitAll()
-                        .requestMatchers("/api/brands/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/brands/**").permitAll()
                         .requestMatchers("/api/users/{id}").permitAll() // Public user profiles
 
                         // Protected endpoints (require authentication)

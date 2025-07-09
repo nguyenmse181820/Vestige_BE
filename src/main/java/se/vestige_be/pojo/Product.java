@@ -36,10 +36,11 @@ public class Product {
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "brand_id")
     @ToString.Exclude
-    private Brand brand;
-
-    @Column(nullable = false, length = 100)
+    private Brand brand;    @Column(nullable = false, length = 100)
     private String title;
+
+    @Column(unique = true, nullable = false, length = 150)
+    private String slug;
 
     @Column(nullable = false, columnDefinition = "text")
     private String description;

@@ -32,6 +32,8 @@ import se.vestige_be.service.UserService;
 import se.vestige_be.util.PaginationUtils;
 
 import java.math.BigDecimal;
+import java.util.HashMap;
+import java.util.List;
 import java.util.Map;
 
 @RestController
@@ -150,8 +152,7 @@ public class ProductController {
                     responseCode = "404",
                     description = "Product not found"
             )
-    })
-    @GetMapping("/{id}")
+    })    @GetMapping("/{id}")
     public ResponseEntity<ApiResponse<ProductDetailResponse>> getProductById(
             @Parameter(description = "Product ID", required = true, example = "1")
             @PathVariable Long id) {
@@ -168,6 +169,70 @@ public class ProductController {
                                 .status(HttpStatus.NOT_FOUND.toString())
                                 .message("Product not found with ID: " + id)
                                 .build()));
+    }
+
+    @Operation(
+            summary = "Get product details by slug",
+            description = "Retrieve detailed information about a specific product using its URL-friendly slug. This endpoint is public and also increments the product's view count."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "Product retrieved successfully",
+                    content = @Content(schema = @Schema(implementation = ProductDetailResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "Product not found"
+            )
+    })
+    @GetMapping("/slug/{slug}")
+    public ResponseEntity<ApiResponse<ProductDetailResponse>> getProductBySlug(
+            @Parameter(description = "Product slug", required = true, example = "apple-iphone-15-pro-max")
+            @PathVariable String slug) {
+        
+        try {
+            ProductDetailResponse product = productService.getProductBySlug(slug);
+            return ResponseEntity.ok(ApiResponse.<ProductDetailResponse>builder()
+                    .status(HttpStatus.OK.toString())
+                    .message("Product retrieved successfully")
+                    .data(product)
+                    .build());
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.NOT_FOUND)
+                    .body(ApiResponse.<ProductDetailResponse>builder()
+                            .status(HttpStatus.NOT_FOUND.toString())
+                            .message("Product not found with slug: " + slug)
+                            .build());
+        }
+    }
+
+    @Operation(
+            summary = "Check if product slug is available",
+            description = "Check if a product slug is available for use. Useful for frontend validation when creating products."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "Slug availability checked successfully"
+            )
+    })
+    @GetMapping("/slug-available/{slug}")
+    public ResponseEntity<ApiResponse<Map<String, Object>>> checkSlugAvailability(
+            @Parameter(description = "Product slug to check", required = true, example = "apple-iphone-15-pro-max")
+            @PathVariable String slug) {
+        
+        boolean isAvailable = productService.isSlugAvailable(slug);
+        
+        return ResponseEntity.ok(ApiResponse.<Map<String, Object>>builder()
+                .status(HttpStatus.OK.toString())
+                .message("Slug availability checked successfully")
+                .data(Map.of(
+                        "slug", slug,
+                        "available", isAvailable,
+                        "message", isAvailable ? "Slug is available" : "Slug is already taken"
+                ))
+                .build());
     }
 
     @Operation(
@@ -639,5 +704,96 @@ public class ProductController {
                         .message(message)
                         .data(product)
                         .build());
+    }
+
+    @Operation(
+            summary = "Get top viewed products",
+            description = "Retrieve top N active products sorted by view count descending."
+    )
+    @ApiResponses(value = {
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Top viewed products retrieved successfully",
+            content = @Content(schema = @Schema(implementation = ProductListResponse.class))
+        )
+    })
+    @GetMapping("/top-viewed")
+    public ResponseEntity<ApiResponse<List<ProductListResponse>>> getTopViewedProducts(
+            @Parameter(description = "Number of top products to retrieve", example = "10")
+            @RequestParam(defaultValue = "10") int limit) {
+        List<ProductListResponse> products = productService.getTopViewedProducts(limit);
+        return ResponseEntity.ok(ApiResponse.<List<ProductListResponse>>builder()
+                .status(HttpStatus.OK.toString())
+                .message("Top " + limit + " viewed products retrieved successfully")
+                .data(products)
+                .build());
+    }
+
+    @Operation(
+        summary = "Like a product",
+        description = "Authenticated user likes a product."
+    )
+    @ApiResponses(value = {
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Product liked successfully"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Product already liked"
+        )
+    })
+    @PostMapping("/{id}/like")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<Void>> likeProduct(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        User user = userService.findByUsername(userDetails.getUsername());
+        boolean liked = productService.likeProduct(user.getUserId(), id);
+        if (liked) {
+            return ResponseEntity.ok(ApiResponse.<Void>builder()
+                    .status(HttpStatus.OK.toString())
+                    .message("Product liked successfully")
+                    .build());
+        } else {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.<Void>builder()
+                    .status(HttpStatus.BAD_REQUEST.toString())
+                    .message("Product already liked")
+                    .build());
+        }
+    }
+
+    @Operation(
+        summary = "Unlike a product",
+        description = "Authenticated user unlikes a product."
+    )
+    @ApiResponses(value = {
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Product unliked successfully"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Product not previously liked"
+        )
+    })
+    @DeleteMapping("/{id}/like")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<Void>> unlikeProduct(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        User user = userService.findByUsername(userDetails.getUsername());
+        boolean unliked = productService.unlikeProduct(user.getUserId(), id);
+        if (unliked) {
+            return ResponseEntity.ok(ApiResponse.<Void>builder()
+                    .status(HttpStatus.OK.toString())
+                    .message("Product unliked successfully")
+                    .build());
+        } else {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST).body(ApiResponse.<Void>builder()
+                    .status(HttpStatus.BAD_REQUEST.toString())
+                    .message("Product not previously liked")
+                    .build());
+        }
     }
 }
