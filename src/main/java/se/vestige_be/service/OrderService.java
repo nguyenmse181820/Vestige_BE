@@ -1288,7 +1288,7 @@ private void validateItemStatusUpdate(OrderItemStatus currentStatus, OrderItemSt
         return status == OrderItemStatus.PENDING || status == OrderItemStatus.PROCESSING;
     }
 
-    private void updateOverallOrderStatus(Order order) {
+    protected void updateOverallOrderStatus(Order order) {
         List<OrderItemStatus> itemStatuses = order.getOrderItems().stream()
                 .map(OrderItem::getStatus)
                 .toList();
@@ -1376,7 +1376,7 @@ private void validateItemStatusUpdate(OrderItemStatus currentStatus, OrderItemSt
             throw new BusinessLogicException("Refund amount must be greater than zero");
         }
     }
-private OrderDetailResponse convertToDetailResponse(Order order) {
+protected OrderDetailResponse convertToDetailResponse(Order order) {
     return orderMapper.convertToDetailResponse(order);
 }
 
@@ -2123,5 +2123,29 @@ public OrderDetailResponse adminUpdateUserOrder(Long userId, Long orderId, Strin
         private BigDecimal platformFee;
         private BigDecimal feePercentage;
         private String notes;
+    }
+
+    @Transactional
+    public OrderDetailResponse requestItemPickup(Long orderId, Long itemId, Long userId) {
+        Order order = getOrderWithValidation(orderId, userId, false);
+        OrderItem orderItem = findOrderItem(order, itemId);
+
+        // Validate that the user making the request is the seller of the specified OrderItem
+        if (!orderItem.getSeller().getUserId().equals(userId)) {
+            throw new UnauthorizedException("Only the seller can request pickup for this item");
+        }
+
+        // Validate that the OrderItem's current status is PROCESSING
+        if (orderItem.getStatus() != OrderItemStatus.PROCESSING) {
+            throw new BusinessLogicException("Item must be in PROCESSING status to request pickup. Current status: " + orderItem.getStatus());
+        }
+
+        // Change the OrderItemStatus to AWAITING_PICKUP
+        orderItem.setStatus(OrderItemStatus.AWAITING_PICKUP);
+        
+        updateOverallOrderStatus(order);
+        order = orderRepository.save(order);
+
+        return convertToDetailResponse(order);
     }
 }

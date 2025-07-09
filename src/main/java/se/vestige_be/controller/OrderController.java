@@ -128,7 +128,7 @@ public class OrderController {
             @RequestParam(defaultValue = "desc") String sortDir,
             
             @Parameter(description = "Filter by order status",
-                      schema = @Schema(allowableValues = {"PENDING", "PAID", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"}))
+                      schema = @Schema(allowableValues = {"PENDING", "PROCESSING", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "REFUNDED", "EXPIRED"}))
             @RequestParam(required = false) String status,
             
             @Parameter(description = "User role perspective", example = "buyer",
@@ -195,7 +195,7 @@ public class OrderController {
 
     @Operation(
             summary = "Confirm payment for an order",
-            description = "Confirms payment for a pending order using Stripe payment intent. Transitions order to PAID status and sets product status to SOLD."
+            description = "Confirms payment for a pending order using Stripe payment intent. Transitions order to PROCESSING status and sets product status to SOLD."
     )
     @ApiResponses(value = {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
@@ -613,7 +613,7 @@ public class OrderController {
             @RequestParam(defaultValue = "desc") String sortDir,
             
             @Parameter(description = "Filter by order status",
-                      schema = @Schema(allowableValues = {"PENDING", "PAID", "PROCESSING", "SHIPPED", "DELIVERED", "CANCELLED", "REFUNDED"}))
+                      schema = @Schema(allowableValues = {"PENDING", "PROCESSING", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "REFUNDED", "EXPIRED"}))
             @RequestParam(required = false) String status,
             
             @Parameter(description = "Filter by buyer ID")
@@ -1064,6 +1064,51 @@ public class OrderController {
         
         return ResponseEntity.ok(ApiResponse.<String>builder()
                 .message("Escrow released successfully by admin")
+                .build());
+    }
+
+    @Operation(
+            summary = "Request pickup for a packed item",
+            description = "Allows a seller to request pickup from Vestige Shipping for a packed item. Transitions order item status to AWAITING_PICKUP."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "200",
+                    description = "Pickup requested successfully",
+                    content = @Content(schema = @Schema(implementation = OrderDetailResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid item status or business rule violation"
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "401",
+                    description = "Authentication required"
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "403",
+                    description = "Access denied - Must be the seller of the item"
+            )
+    })
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/{orderId}/items/{itemId}/request-pickup")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<OrderDetailResponse>> requestItemPickup(
+            @Parameter(description = "Order ID", required = true, example = "1")
+            @PathVariable Long orderId,
+            
+            @Parameter(description = "Order item ID", required = true, example = "1")
+            @PathVariable Long itemId,
+            
+            @Parameter(hidden = true)
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        User user = userService.findByUsername(userDetails.getUsername());
+        OrderDetailResponse order = orderService.requestItemPickup(orderId, itemId, user.getUserId());
+
+        return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
+                .message("Pickup requested. Our shipper will arrive shortly.")
+                .data(order)
                 .build());
     }
 }

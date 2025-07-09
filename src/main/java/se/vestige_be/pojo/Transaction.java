@@ -95,13 +95,13 @@ public class Transaction {
     private LocalDateTime shippedAt;
     private LocalDateTime deliveredAt;
 
-    @OneToMany(mappedBy = "transaction", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
-    @Builder.Default
-    @ToString.Exclude
-    private List<ShippingOrder> shippingOrders = new ArrayList<>();
-
     @OneToMany(mappedBy = "transaction", fetch = FetchType.LAZY)
     @Builder.Default
     @ToString.Exclude
     private List<Review> reviews = new ArrayList<>();
+
+    @OneToMany(mappedBy = "transaction", cascade = CascadeType.ALL, fetch = FetchType.LAZY)
+    @Builder.Default
+    @ToString.Exclude
+    private List<PickupEvidence> pickupEvidence = new ArrayList<>();
 }
