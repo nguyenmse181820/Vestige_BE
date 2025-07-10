@@ -62,6 +62,7 @@ public class DataInitializer implements CommandLineRunner {
                 List<Role> roles = new ArrayList<>();
                 roles.add(Role.builder().name("USER").build());
                 roles.add(Role.builder().name("ADMIN").build());
+                roles.add(Role.builder().name("SHIPPER").build());
                 roleRepository.saveAll(roles);
                 System.out.println("Default roles have been created");
             }
@@ -76,6 +77,7 @@ public class DataInitializer implements CommandLineRunner {
             if (userCount == 0) {
                 Role userRole = roleRepository.findByName("USER").orElseThrow(() -> new RuntimeException("USER role not found"));
                 Role adminRole = roleRepository.findByName("ADMIN").orElseThrow(() -> new RuntimeException("ADMIN role not found"));
+                Role shipperRole = roleRepository.findByName("SHIPPER").orElseThrow(() -> new RuntimeException("SHIPPER role not found"));
                 String commonPassword = "Nguyenm$E181820";
                 String encodedPassword = passwordEncoder.encode(commonPassword);
 
@@ -84,8 +86,36 @@ public class DataInitializer implements CommandLineRunner {
                 users.add(User.builder().username("johndoe").email("john.doe@example.com").passwordHash(encodedPassword).firstName("John").lastName("Doe").bio("Fashion enthusiast and collector").role(userRole).isVerified(true).accountStatus("active").sellerRating(new BigDecimal("4.5")).sellerReviewsCount(25).successfulTransactions(20).trustScore(new BigDecimal("4.2")).build());
                 users.add(User.builder().username("jansmith").email("jane.smith@example.com").passwordHash(encodedPassword).firstName("Jane").lastName("Smith").bio("Luxury handbag specialist").role(userRole).isVerified(true).isLegitProfile(true).accountStatus("active").sellerRating(new BigDecimal("4.8")).sellerReviewsCount(45).successfulTransactions(38).trustScore(new BigDecimal("4.7")).build());
                 users.add(User.builder().username("mikewilson").email("mike.wilson@example.com").passwordHash(encodedPassword).firstName("Mike").lastName("Wilson").bio("Watch collector and trader").role(userRole).isVerified(true).accountStatus("active").sellerRating(new BigDecimal("4.3")).sellerReviewsCount(12).successfulTransactions(10).trustScore(new BigDecimal("4.0")).build());
+                users.add(User.builder()
+                    .username("shipper01")
+                    .email("shipping@vestige.com")
+                    .passwordHash(encodedPassword)
+                    .firstName("Kho")
+                    .lastName("Vestige")
+                    .role(shipperRole)
+                    .isVerified(true)
+                    .accountStatus("active")
+                    .trustScore(new BigDecimal("5.0"))
+                    .build());
+                
+                // Create second shipper user with different password
+                String shipperPassword = "Nguyem$E181820";
+                String encodedShipperPassword = passwordEncoder.encode(shipperPassword);
+                users.add(User.builder()
+                    .username("shipper")
+                    .email("shipper@vestige.com")
+                    .passwordHash(encodedShipperPassword)
+                    .firstName("Logistics")
+                    .lastName("Team")
+                    .role(shipperRole)
+                    .isVerified(true)
+                    .accountStatus("active")
+                    .trustScore(new BigDecimal("5.0"))
+                    .build());
                 userRepository.saveAll(users);
-                System.out.println("Default users have been created (password for all: Nguyenm$E181820)");
+                System.out.println("Default users have been created:");
+                System.out.println("- Regular users (admin, johndoe, jansmith, mikewilson, shipper01): password = Nguyenm$E181820");
+                System.out.println("- Shipper user (shipper): password = Nguyem$E181820");
             }
         } catch (Exception e) {
             System.err.println("Error initializing users: " + e.getMessage());
@@ -249,12 +279,12 @@ public class DataInitializer implements CommandLineRunner {
                 productRepository.save(gucciBag);
                 orders.add(order1);
 
-                // Order 2: PAID (Items PROCESSING) - John buys iPhone from Mike
+                // Order 2: PROCESSING (Items PROCESSING) - John buys iPhone from Mike
                 Order order2 = Order.builder()
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .paymentMethod(PaymentMethod.STRIPE_CARD)
                         .totalAmount(iphone.getPrice())
-                        .status(OrderStatus.PAID).paidAt(LocalDateTime.now().minusDays(4)).createdAt(LocalDateTime.now().minusDays(4))
+                        .status(OrderStatus.PROCESSING).paidAt(LocalDateTime.now().minusDays(4)).createdAt(LocalDateTime.now().minusDays(4))
                         .build();
                 OrderItem item2_1 = OrderItem.builder().order(order2).product(iphone).seller(iphone.getSeller())
                         .price(iphone.getPrice()).platformFee(iphone.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
@@ -281,12 +311,12 @@ public class DataInitializer implements CommandLineRunner {
                         .buyer(johnDoe).shippingAddress(johnDoeAddress)
                         .paymentMethod(PaymentMethod.COD)
                         .totalAmount(nikeHoodieJane.getPrice())
-                        .status(OrderStatus.SHIPPED).paidAt(LocalDateTime.now().minusDays(3)).shippedAt(LocalDateTime.now().minusDays(2))
+                        .status(OrderStatus.OUT_FOR_DELIVERY).paidAt(LocalDateTime.now().minusDays(3)).shippedAt(LocalDateTime.now().minusDays(2))
                         .createdAt(LocalDateTime.now().minusDays(3))
                         .build();
                 OrderItem item3_1 = OrderItem.builder().order(order3).product(nikeHoodieJane).seller(nikeHoodieJane.getSeller())
                         .price(nikeHoodieJane.getPrice()).platformFee(nikeHoodieJane.getPrice().multiply(feePercentage.divide(new BigDecimal(100))))
-                        .feePercentage(feePercentage).status(OrderItemStatus.SHIPPED).escrowStatus(EscrowStatus.HOLDING)
+                        .feePercentage(feePercentage).status(OrderItemStatus.OUT_FOR_DELIVERY).escrowStatus(EscrowStatus.HOLDING)
                         .build();
                 order3.setOrderItems(List.of(item3_1));
                 nikeHoodieJane.setStatus(ProductStatus.SOLD);

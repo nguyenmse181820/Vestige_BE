@@ -19,6 +19,7 @@ import org.springframework.security.web.SecurityFilterChain;
 import org.springframework.security.web.authentication.UsernamePasswordAuthenticationFilter;
 import org.springframework.web.cors.CorsConfigurationSource;
 import se.vestige_be.service.CustomUserDetailsService;
+import se.vestige_be.util.CookieUtil;
 
 @Configuration
 @EnableWebSecurity
@@ -28,18 +29,21 @@ public class SecurityConfig {
     private final CustomUserDetailsService userDetailsService;
     private final JWTTokenUtil jwtTokenUtil;
     private final CorsConfigurationSource corsConfigurationSource;
+    private final CookieUtil cookieUtil;
 
     public SecurityConfig(@Lazy CustomUserDetailsService userDetailsService,
                           JWTTokenUtil jwtTokenUtil,
-                          CorsConfigurationSource corsConfigurationSource) {
+                          CorsConfigurationSource corsConfigurationSource,
+                          CookieUtil cookieUtil) {
         this.userDetailsService = userDetailsService;
         this.jwtTokenUtil = jwtTokenUtil;
         this.corsConfigurationSource = corsConfigurationSource;
+        this.cookieUtil = cookieUtil;
     }
 
     @Bean
     public JwtAuthenticationFilter jwtAuthenticationFilter() {
-        return new JwtAuthenticationFilter(jwtTokenUtil, userDetailsService);
+        return new JwtAuthenticationFilter(jwtTokenUtil, userDetailsService, cookieUtil);
     }
 
     @Bean

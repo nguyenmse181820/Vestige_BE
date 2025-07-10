@@ -44,13 +44,17 @@ stripe:
 # JWT Configuration
 jwt:
   secret: ${JWT_SECRET}
-  expiration: ${JWT_EXPIRATION:3600000}
-  refresh-expiration: ${JWT_REFRESH_EXPIRATION:86400000}
+  expiration: ${JWT_EXPIRATION:900000}  # 15 minutes for access token
+  refresh-expiration: ${JWT_REFRESH_EXPIRATION:604800000}  # 7 days for refresh token
 
 # App Configuration
 app:
   frontend:
     url: ${FRONTEND_URL:http://localhost:3000}
+  cookie:
+    secure: ${COOKIE_SECURE:false}  # Set to true in production with HTTPS
+    same-site: ${COOKIE_SAME_SITE:STRICT}
+    domain: ${COOKIE_DOMAIN:}  # Set your domain in production
 
 # CORS Configuration
 cors:

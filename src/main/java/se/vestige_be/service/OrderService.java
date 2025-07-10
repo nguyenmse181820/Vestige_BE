@@ -9,13 +9,10 @@ import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageImpl;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Pageable;
-import org.springframework.data.domain.Sort;
 import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
-import jakarta.persistence.criteria.Predicate;
 import jakarta.persistence.criteria.JoinType;
-import jakarta.persistence.criteria.Join;
 import se.vestige_be.dto.request.OrderCreateRequest;
 import se.vestige_be.dto.request.OrderStatusUpdateRequest;
 import se.vestige_be.dto.response.*;
@@ -25,11 +22,16 @@ import se.vestige_be.exception.UnauthorizedException;
 import se.vestige_be.pojo.*;
 import se.vestige_be.pojo.enums.*;
 import se.vestige_be.repository.*;
+import se.vestige_be.mapper.OrderMapper;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.time.format.DateTimeParseException;
 import java.util.*;
+import java.util.Comparator;
+import java.util.Optional;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -48,6 +50,7 @@ public class OrderService {
     private final TransactionRepository transactionRepository;
     private final FeeTierService feeTierService;
     private final StripeService stripeService;
+    private final OrderMapper orderMapper;
 
     @Transactional
     public OrderDetailResponse createOrder(OrderCreateRequest request, Long buyerId) {
@@ -78,11 +81,11 @@ public class OrderService {
                 PaymentIntent paymentIntent = stripeService.createPlatformCharge(order.getTotalAmount(), order.getOrderId());
                 paymentIntentId = paymentIntent.getId();
                 clientSecret = paymentIntent.getClientSecret();
-                
+
                 // Store the PaymentIntent ID on the order
                 order.setStripePaymentIntentId(paymentIntentId);
                 order = orderRepository.save(order);
-                
+
                 log.info("Created Stripe PaymentIntent {} for order {}", paymentIntentId, order.getOrderId());
             } catch (Exception e) {
                 log.error("Failed to create Stripe payment for order {}: {}", order.getOrderId(), e.getMessage());
@@ -92,18 +95,18 @@ public class OrderService {
 
         List<OrderItem> orderItems = createOrderItems(itemDataList, order);
         order.setOrderItems(orderItems);
-        
+
         // Save the order with its items to get proper IDs
         order = orderRepository.save(order);
-        
+
         // Create transactions after order items have been saved and have IDs
         createTransactions(order.getOrderItems(), buyer, shippingAddress, paymentIntentId);
         markProductsAsPendingPayment(itemDataList);
-        
+
         // Refresh the order from database to ensure all relationships are loaded
         order = orderRepository.findById(order.getOrderId())
                 .orElseThrow(() -> new IllegalStateException("Order not found after creation"));
-        
+
         // Convert to response after everything is properly saved
         OrderDetailResponse response = convertToDetailResponse(order);
         if (clientSecret != null) {
@@ -126,21 +129,21 @@ public class OrderService {
             String paymentStatus = stripeService.getPaymentIntentStatus(cleanPaymentIntentId);
 
             boolean paymentSuccessful = stripeService.verifyPaymentForOrder(
-                cleanPaymentIntentId, order.getTotalAmount(), orderId);
+                    cleanPaymentIntentId, order.getTotalAmount(), orderId);
             if (!paymentSuccessful) {
                 String errorMessage = switch (paymentStatus) {
-                    case "requires_payment_method" -> 
-                        "Payment not completed. Please complete the payment on the frontend using Stripe Elements with the client_secret.";
-                    case "requires_confirmation" -> 
-                        "Payment requires confirmation. Please confirm the payment on the frontend.";
-                    case "requires_action" -> 
-                        "Payment requires additional action (e.g., 3D Secure authentication).";
-                    case "processing" -> 
-                        "Payment is still processing. Please wait and try again.";
-                    case "canceled" -> 
-                        "Payment was canceled. Please create a new order.";
-                    default -> 
-                        "Payment verification failed. Current status: " + paymentStatus;
+                    case "requires_payment_method" ->
+                            "Payment not completed. Please complete the payment on the frontend using Stripe Elements with the client_secret.";
+                    case "requires_confirmation" ->
+                            "Payment requires confirmation. Please confirm the payment on the frontend.";
+                    case "requires_action" ->
+                            "Payment requires additional action (e.g., 3D Secure authentication).";
+                    case "processing" ->
+                            "Payment is still processing. Please wait and try again.";
+                    case "canceled" ->
+                            "Payment was canceled. Please create a new order.";
+                    default ->
+                            "Payment verification failed. Current status: " + paymentStatus;
                 };
                 throw new BusinessLogicException(errorMessage);
             }
@@ -152,12 +155,13 @@ public class OrderService {
         }
 
         order.setStripePaymentIntentId(stripePaymentIntentId);
-        order.setStatus(OrderStatus.PAID);
-        order.setPaidAt(LocalDateTime.now());        order.getOrderItems().forEach(item -> {
+        order.setStatus(OrderStatus.PROCESSING);
+        order.setPaidAt(LocalDateTime.now());        
+        order.getOrderItems().forEach(item -> {
             if (item.getStatus() == OrderItemStatus.PENDING) {
                 item.setStatus(OrderItemStatus.PROCESSING);
                 item.setEscrowStatus(EscrowStatus.HOLDING); // Now money is actually held in escrow
-                
+
                 Product product = item.getProduct();
                 product.setStatus(ProductStatus.SOLD);
                 product.setSoldAt(LocalDateTime.now());
@@ -190,26 +194,14 @@ public class OrderService {
         validateItemStatusUpdate(orderItem.getStatus(), newStatus, isBuyer, isSeller);
 
         orderItem.setStatus(newStatus);
-        
+
         switch (newStatus) {
-            case PENDING:
-                // No special handling needed for pending status
-                break;
-            case PROCESSING:
-                // No special handling needed for processing status
-                break;
-            case SHIPPED:
-                handleItemShipped(orderItem, request);
-                break;
-            case DELIVERED:
-                handleItemDelivered(orderItem);
-                break;
-            case CANCELLED:
-                handleItemCancelled(orderItem);
-                break;
-            case REFUNDED:
-                // Refund handling is done separately through admin endpoints
-                break;
+            case AWAITING_PICKUP -> handleItemAwaitingPickup(orderItem);
+            case IN_WAREHOUSE -> handleItemInWarehouse(orderItem); // Assuming this will be called from a future LogisticsService
+            case OUT_FOR_DELIVERY -> handleItemOutForDelivery(orderItem, request);
+            case DELIVERED -> handleItemDelivered(orderItem);
+            case CANCELLED -> handleItemCancelled(orderItem);
+            default -> throw new BusinessLogicException("The status update for '" + newStatus + "' is not supported here.");
         }
 
         updateOverallOrderStatus(order);
@@ -218,109 +210,51 @@ public class OrderService {
         return convertToDetailResponse(order);
     }
 
-    @Transactional
-    public OrderDetailResponse cancelOrder(Long orderId, String reason, Long userId) {
-        log.info("Attempting to cancel order: orderId={}, userId={}, reason={}", orderId, userId, reason);
+    // cancelOrder method was removed as per refactoring requirement.
+    // Cancellations now happen at the individual item level through updateOrderItemStatus.
 
-        Order order = getOrderWithValidation(orderId, userId, false);
-
-        boolean hasNonCancellableItems = order.getOrderItems().stream()
-                .anyMatch(item -> !isItemCancellable(item.getStatus()));
-
-        if (hasNonCancellableItems) {
-            throw new BusinessLogicException("Cannot cancel order with shipped or delivered items.");
-        }
-
-        String paymentIntentId = order.getOrderItems().stream()
-                .map(item -> getTransactionForOrderItem(item.getOrderItemId()))
-                .map(Transaction::getStripePaymentIntentId)
-                .filter(Objects::nonNull)
-                .findFirst()
-                .orElse(null);
-
-        if (paymentIntentId != null) {
-            try {
-                BigDecimal totalRefundAmount = order.getOrderItems().stream()
-                        .filter(item -> isItemCancellable(item.getStatus()))
-                        .map(OrderItem::getPrice)
-                        .reduce(BigDecimal.ZERO, BigDecimal::add);
-
-                if (totalRefundAmount.compareTo(BigDecimal.ZERO) > 0) {
-                    log.info("Refunding {} for paymentIntentId {}", totalRefundAmount, paymentIntentId);
-                    stripeService.refundPayment(paymentIntentId, totalRefundAmount);
-                }
-
-            } catch (Exception e) {
-                log.error("Stripe refund failed for order {}: {}. Cancellation process aborted.", orderId, e.getMessage());
-                throw new BusinessLogicException("Refund failed. Please try again or contact support. " + e.getMessage());
-            }
-        }
-
-        order.getOrderItems().forEach(item -> {
-            if (isItemCancellable(item.getStatus())) {
-                item.setStatus(OrderItemStatus.CANCELLED);
-                item.setEscrowStatus(EscrowStatus.REFUNDED);
-
-                Transaction transaction = getTransactionForOrderItem(item.getOrderItemId());
-                transaction.setStatus(TransactionStatus.CANCELLED);
-                transactionRepository.save(transaction);
-
-                Product product = item.getProduct();
-                if (product.getStatus() == ProductStatus.SOLD || product.getStatus() == ProductStatus.PENDING_PAYMENT) {
-                    product.setStatus(ProductStatus.ACTIVE);
-                    product.setSoldAt(null);
-                    productRepository.save(product);
-                }
-            }
-        });
-
-        order.setStatus(OrderStatus.CANCELLED);
-        orderRepository.save(order);
-
-        log.info("Order {} cancelled successfully.", orderId);
-        return convertToDetailResponse(order);
-    }    public PagedResponse<OrderListResponse> getUserOrders(Long userId, String status, String role, Pageable pageable) {
-        Page<Order> orders;
+    public PagedResponse<OrderListResponse> getUserOrders(Long userId, String status, String role, Pageable pageable) {
+    Page<Order> orders;
 
         if ("seller".equalsIgnoreCase(role)) {
-            orders = getSellerOrders(userId, status, pageable);
-        } else {
-            orders = getBuyerOrders(userId, status, pageable);
-        }
+        orders = getSellerOrders(userId, status, pageable);
+    } else {
+        orders = getBuyerOrders(userId, status, pageable);
+    }
 
-        // Load product images separately to avoid MultipleBagFetchException
-        loadProductImagesForOrders(orders.getContent());
+    // Load product images separately to avoid MultipleBagFetchException
+    loadProductImagesForOrders(orders.getContent());
 
-        Page<OrderListResponse> orderResponses = orders.map(this::convertToListResponse);
+    Page<OrderListResponse> orderResponses = orders.map(orderMapper::convertToListResponse);
         return PagedResponse.of(orderResponses);
-    }
+}
 
-    public OrderDetailResponse getOrderById(Long orderId, Long userId) {
-        Order order = getOrderWithValidation(orderId, userId, false);
-        return convertToDetailResponse(order);
-    }
+public OrderDetailResponse getOrderById(Long orderId, Long userId) {
+    Order order = getOrderWithValidation(orderId, userId, false);
+    return convertToDetailResponse(order);
+}
 
-    /**
-     * Admin method to get all orders with comprehensive filtering
-     * Supports filtering by status, buyer, seller, date range, and search
-     */
+/**
+ * Admin method to get all orders with comprehensive filtering
+ * Supports filtering by status, buyer, seller, date range, and search
+ */
     @Transactional(readOnly = true)
     public PagedResponse<OrderListResponse> getAllOrdersForAdmin(
             String status, Long buyerId, Long sellerId, String search,
             LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
-          // Use specification pattern with proper JOIN FETCH for relationships
+        // Use specification pattern with proper JOIN FETCH for relationships
         Page<Order> orders = orderRepository.findAll((root, query, criteriaBuilder) -> {
             // Add JOIN FETCH for required relationships
             root.fetch("buyer", JoinType.LEFT);
             root.fetch("orderItems", JoinType.LEFT).fetch("product", JoinType.LEFT);
             root.fetch("orderItems", JoinType.LEFT).fetch("seller", JoinType.LEFT);
             root.fetch("shippingAddress", JoinType.LEFT);
-            
+
             // Make the query DISTINCT to avoid duplicates from JOIN FETCH
             query.distinct(true);
-            
+
             List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
-            
+
             // Filter by status if provided
             if (status != null && !status.trim().isEmpty()) {
                 try {
@@ -331,18 +265,18 @@ public class OrderService {
                     predicates.add(criteriaBuilder.disjunction());
                 }
             }
-            
+
             // Filter by buyer ID
             if (buyerId != null) {
                 predicates.add(criteriaBuilder.equal(root.get("buyer").get("userId"), buyerId));
             }
-            
+
             // Filter by seller ID (requires join to order items)
             if (sellerId != null) {
                 var orderItemsJoin = root.join("orderItems");
                 predicates.add(criteriaBuilder.equal(orderItemsJoin.get("seller").get("userId"), sellerId));
             }
-            
+
             // Filter by date range
             if (startDate != null) {
                 predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), startDate));
@@ -350,30 +284,53 @@ public class OrderService {
             if (endDate != null) {
                 predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("createdAt"), endDate));
             }
-            
+
             // Search functionality (search in buyer username or order ID)
             if (search != null && !search.trim().isEmpty()) {
                 String searchPattern = "%" + search.toLowerCase() + "%";
                 jakarta.persistence.criteria.Predicate searchPredicate = criteriaBuilder.or(
-                    criteriaBuilder.like(
-                        criteriaBuilder.lower(root.get("buyer").get("username")), 
-                        searchPattern
-                    ),
-                    criteriaBuilder.like(
-                        criteriaBuilder.toString(root.get("orderId")), 
-                        searchPattern
-                    )
+                        criteriaBuilder.like(
+                                criteriaBuilder.lower(root.get("buyer").get("username")),
+                                searchPattern
+                        ),
+                        criteriaBuilder.like(
+                                criteriaBuilder.toString(root.get("orderId")),
+                                searchPattern
+                        )
                 );
                 predicates.add(searchPredicate);
             }
-            
+
             return criteriaBuilder.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));        }, pageable);
-        
+
         // Load product images separately to avoid MultipleBagFetchException
         loadProductImagesForOrders(orders.getContent());
-        
-        Page<OrderListResponse> orderResponses = orders.map(this::convertToListResponse);
+
+        Page<OrderListResponse> orderResponses = orders.map(orderMapper::convertToListResponse);
         return PagedResponse.of(orderResponses);
+    }
+
+    private void handleItemAwaitingPickup(OrderItem orderItem) {
+        orderItem.setStatus(OrderItemStatus.AWAITING_PICKUP);
+        log.info("OrderItem {} is now AWAITING_PICKUP.", orderItem.getOrderItemId());
+    }
+
+    private void handleItemInWarehouse(OrderItem orderItem) {
+        orderItem.setStatus(OrderItemStatus.IN_WAREHOUSE);
+        Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
+        // Generate an internal tracking number
+        transaction.setTrackingNumber("VSTG-" + orderItem.getOrderItemId());
+        transactionRepository.save(transaction);
+        log.info("OrderItem {} is now IN_WAREHOUSE.", orderItem.getOrderItemId());
+    }
+
+    private void handleItemOutForDelivery(OrderItem orderItem, OrderStatusUpdateRequest request) {
+        orderItem.setStatus(OrderItemStatus.OUT_FOR_DELIVERY);
+        Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
+        transaction.setShippedAt(LocalDateTime.now());
+        transaction.setStatus(TransactionStatus.SHIPPED); // Use SHIPPED for transaction compatibility
+        transactionRepository.save(transaction);
+        log.info("OrderItem {} is now OUT_FOR_DELIVERY.", orderItem.getOrderItemId());
     }
 
     /**
@@ -384,14 +341,14 @@ public class OrderService {
     public OrderDetailResponse forceUpdateOrderStatus(Long orderId, String newStatus, String adminNotes, Long adminId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + orderId));
-        
+
         OrderStatus orderStatus;
         try {
             orderStatus = OrderStatus.valueOf(newStatus.toUpperCase());
         } catch (IllegalArgumentException e) {
             throw new BusinessLogicException("Invalid order status: " + newStatus);
         }
-        
+
         OrderStatus oldStatus = order.getStatus();
         order.setStatus(orderStatus);
 
@@ -400,11 +357,8 @@ public class OrderService {
             case PENDING -> {
                 // No specific timestamp needed for pending
             }
-            case PAID -> order.setPaidAt(now);
-            case PROCESSING -> {
-                // No specific timestamp needed for processing
-            }
-            case SHIPPED -> order.setShippedAt(now);
+            case PROCESSING -> order.setPaidAt(now);
+            case OUT_FOR_DELIVERY -> order.setShippedAt(now);
             case DELIVERED -> order.setDeliveredAt(now);
             case CANCELLED -> {
                 // No specific timestamp needed for cancelled (could add cancelledAt if field exists)
@@ -413,11 +367,11 @@ public class OrderService {
                 // No specific timestamp needed for refunded (could add refundedAt if field exists)
             }
         }
-        
+
         // Log admin action
-        log.info("Admin {} force updated order {} status from {} to {}. Notes: {}", 
+        log.info("Admin {} force updated order {} status from {} to {}. Notes: {}",
                 adminId, orderId, oldStatus, orderStatus, adminNotes);
-        
+
         order = orderRepository.save(order);
         return convertToDetailResponse(order);
     }
@@ -430,10 +384,10 @@ public class OrderService {
     public OrderDetailResponse processAdminRefund(Long orderId, BigDecimal refundAmount, String reason, Long adminId) {
         Order order = orderRepository.findById(orderId)
                 .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + orderId));
-        
+
         // Validate refund amount before processing
         validateRefundAmount(order, refundAmount);
-        
+
         // Use stored PaymentIntent ID or get from transaction
         String paymentIntentId = order.getStripePaymentIntentId();
         if (paymentIntentId == null) {
@@ -444,11 +398,11 @@ public class OrderService {
                     .findFirst()
                     .orElse(null);
         }
-        
+
         // Process Stripe refund if payment intent exists
         if (paymentIntentId != null) {
             try {
-                log.info("Admin {} processing refund for order {} amount {} reason: {}", 
+                log.info("Admin {} processing refund for order {} amount {} reason: {}",
                         adminId, orderId, refundAmount, reason);
                 stripeService.refundPayment(paymentIntentId, refundAmount);
             } catch (Exception e) {
@@ -456,17 +410,17 @@ public class OrderService {
                 throw new BusinessLogicException("Stripe refund failed: " + e.getMessage());
             }
         }
-        
+
         // Update order status only if full refund
         BigDecimal totalOrderAmount = order.getTotalAmount();
         if (refundAmount.compareTo(totalOrderAmount) >= 0) {
             order.setStatus(OrderStatus.REFUNDED);
-            
+
             // Update all order items for full refund
             order.getOrderItems().forEach(item -> {
                 if (item.getStatus() != OrderItemStatus.DELIVERED) {
                     item.setStatus(OrderItemStatus.REFUNDED);
-                    
+
                     // Revert product status if it was sold
                     Product product = item.getProduct();
                     if (ProductStatus.SOLD.equals(product.getStatus())) {
@@ -480,9 +434,9 @@ public class OrderService {
             // Partial refund - keep order status as is, but mark individual items as needed
             log.info("Partial refund processed for order {}. Amount: {}", orderId, refundAmount);
         }
-        
+
         log.info("Admin {} successfully processed refund for order {}", adminId, orderId);
-        
+
         order = orderRepository.save(order);
         return convertToDetailResponse(order);
     }
@@ -495,61 +449,302 @@ public class OrderService {
         // Get total counts by status
         Map<OrderStatus, Long> statusCounts = Arrays.stream(OrderStatus.values())
                 .collect(Collectors.toMap(
-                    status -> status,
+                        status -> status,
                         orderRepository::countByStatus,
-                    (existing, replacement) -> existing,
-                    LinkedHashMap::new
+                        (existing, replacement) -> existing,
+                        LinkedHashMap::new
                 ));
-        
+
         // Get today's orders
         LocalDateTime startOfDay = LocalDateTime.now().withHour(0).withMinute(0).withSecond(0).withNano(0);
         LocalDateTime endOfDay = startOfDay.plusDays(1);
         long todayOrders = orderRepository.countByCreatedAtBetween(startOfDay, endOfDay);
-        
+
         // Calculate total revenue (completed orders)
         BigDecimal totalRevenue = orderRepository.findByStatus(OrderStatus.DELIVERED)
                 .stream()
                 .map(Order::getTotalAmount)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
+
         // Calculate platform fees collected
         BigDecimal totalPlatformFees = orderItemRepository.findByStatus(OrderItemStatus.DELIVERED)
                 .stream()
                 .map(OrderItem::getPlatformFee)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
+
         return Map.of(
                 "totalOrders", orderRepository.count(),
                 "todayOrders", todayOrders,
                 "totalRevenue", totalRevenue,
                 "platformFeesCollected", totalPlatformFees,
                 "statusBreakdown", statusCounts,
-                "avgOrderValue", statusCounts.get(OrderStatus.DELIVERED) > 0 ? 
-                    totalRevenue.divide(BigDecimal.valueOf(statusCounts.get(OrderStatus.DELIVERED)), 2, RoundingMode.HALF_UP) : 
-                    BigDecimal.ZERO
+                "avgOrderValue", statusCounts.get(OrderStatus.DELIVERED) > 0 ?
+                        totalRevenue.divide(BigDecimal.valueOf(statusCounts.get(OrderStatus.DELIVERED)), 2, RoundingMode.HALF_UP) :
+                        BigDecimal.ZERO
         );
     }
 
     /**
-     * Utility method to parse date strings for admin filtering
+     * Provides comprehensive statistics for admin dashboard including user metrics,
+     * order trends, financial data, and performance indicators.
+     *
+     * @param period Period for trends analysis (daily, weekly, monthly)
+     * @param periods Number of periods to include in trend data
+     * @param startDate Optional start date for filtering
+     * @param endDate Optional end date for filtering
+     * @return Map containing comprehensive system statistics
      */
-    public LocalDateTime parseDateTime(String dateString) {
-        if (dateString == null || dateString.trim().isEmpty()) {
-            return null;
-        }
-        try {
-            // Support multiple date formats
-            if (dateString.length() == 10) {
-                // Date only format (YYYY-MM-DD) - add time
-                return LocalDateTime.parse(dateString + "T00:00:00");
-            }
-            return LocalDateTime.parse(dateString);
-        } catch (Exception e) {
-            throw new BusinessLogicException("Invalid date format: " + dateString + ". Use ISO format (YYYY-MM-DDTHH:mm:ss)");
-        }
+    public Object getComprehensiveSystemStatistics(String period, int periods, LocalDateTime startDate, LocalDateTime endDate) {
+        // Set default dates if not provided
+        LocalDateTime start = startDate != null ? startDate : LocalDateTime.now().minusMonths(12);
+        LocalDateTime end = endDate != null ? endDate : LocalDateTime.now();
+
+        // 1. Order metrics
+        Map<OrderStatus, Long> statusCounts = Arrays.stream(OrderStatus.values())
+                .collect(Collectors.toMap(
+                        status -> status,
+                        orderRepository::countByStatus,
+                        (existing, replacement) -> existing,
+                        LinkedHashMap::new
+                ));
+
+        long totalOrders = orderRepository.count();
+        long totalCompletedOrders = orderRepository.countByStatus(OrderStatus.DELIVERED);
+        long totalCancelledOrders = orderRepository.countByStatus(OrderStatus.CANCELLED);
+
+        // 2. Financial metrics
+        BigDecimal totalRevenue = orderRepository.findByStatus(OrderStatus.DELIVERED)
+                .stream()
+                .map(Order::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        BigDecimal totalPlatformFees = orderItemRepository.findByStatus(OrderItemStatus.DELIVERED)
+                .stream()
+                .map(OrderItem::getPlatformFee)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Calculate average order value
+        BigDecimal avgOrderValue = totalCompletedOrders > 0 ?
+                totalRevenue.divide(BigDecimal.valueOf(totalCompletedOrders), 2, RoundingMode.HALF_UP) :
+                BigDecimal.ZERO;
+
+        // 3. User metrics
+        long totalUsers = userRepository.count();
+        long activeUsers = userRepository.countByAccountStatus("active");
+        long sellersWithCompletedSales = userRepository.countDistinctSellersByOrderItemStatus(OrderItemStatus.DELIVERED);
+
+        // 4. Transaction metrics
+        long pendingEscrows = transactionRepository.countByEscrowStatus(EscrowStatus.HOLDING);
+        long disputedTransactions = transactionRepository.countByDisputeStatus(DisputeStatus.OPEN);
+
+        // 5. Generate trend data based on period
+        List<Map<String, Object>> trends = generateTrendData(period, periods, start, end);
+
+        // 6. Performance metrics
+        double completionRate = totalOrders > 0 ?
+                (double)totalCompletedOrders / totalOrders * 100 : 0;
+        double cancellationRate = totalOrders > 0 ?
+                (double)totalCancelledOrders / totalOrders * 100 : 0;
+
+        // 7. Category analysis - top selling categories
+        List<Map<String, Object>> topCategories = getTopSellingCategories(5, start, end);
+
+        // 8. Brand analysis - top selling brands
+        List<Map<String, Object>> topBrands = getTopSellingBrands(5, start, end);
+
+        // Build the comprehensive response
+        Map<String, Object> result = new LinkedHashMap<>();
+
+        // Summary metrics
+        Map<String, Object> summaryMap = new HashMap<>();
+        summaryMap.put("totalOrders", totalOrders);
+        summaryMap.put("completedOrders", totalCompletedOrders);
+        summaryMap.put("cancelledOrders", totalCancelledOrders);
+        summaryMap.put("totalRevenue", totalRevenue);
+        summaryMap.put("platformFeesCollected", totalPlatformFees);
+        summaryMap.put("avgOrderValue", avgOrderValue);
+        summaryMap.put("totalUsers", totalUsers);
+        summaryMap.put("activeUsers", activeUsers);
+        summaryMap.put("activeSellers", sellersWithCompletedSales);
+        result.put("summary", summaryMap);
+
+        // Status breakdown
+        result.put("orderStatusBreakdown", statusCounts);
+
+        // Performance metrics
+        Map<String, Object> performanceMap = new HashMap<>();
+        performanceMap.put("orderCompletionRate", completionRate);
+        performanceMap.put("orderCancellationRate", cancellationRate);
+        performanceMap.put("pendingEscrows", pendingEscrows);
+        performanceMap.put("disputedTransactions", disputedTransactions);
+        result.put("performance", performanceMap);
+
+        // Trend data
+        Map<String, Object> trendMap = new HashMap<>();
+        trendMap.put("period", period);
+        trendMap.put("data", trends);
+        result.put("trends", trendMap);
+
+        // Top categories and brands
+        result.put("topCategories", topCategories);
+        result.put("topBrands", topBrands);
+
+        return result;
     }
 
-    // Webhook handlers
+    /**
+     * Generates trend data for orders and revenue based on the specified period
+     */
+    private List<Map<String, Object>> generateTrendData(String period, int periods, LocalDateTime start, LocalDateTime end) {
+        List<Map<String, Object>> trends = new ArrayList<>();
+
+        LocalDateTime currentPeriodStart = end;
+
+        // Determine the period function and format
+        Function<LocalDateTime, LocalDateTime> periodStartFunc;
+        Function<LocalDateTime, LocalDateTime> periodEndFunc;
+        Function<LocalDateTime, String> periodLabelFunc;
+
+        switch (period.toLowerCase()) {
+            case "daily":
+                periodStartFunc = dt -> dt.withHour(0).withMinute(0).withSecond(0).withNano(0);
+                periodEndFunc = dt -> dt.withHour(0).withMinute(0).withSecond(0).withNano(0).plusDays(1);
+                periodLabelFunc = dt -> dt.toLocalDate().toString();
+                // Move back to start of current day
+                currentPeriodStart = periodStartFunc.apply(end);
+                // Move back periods-1 days (to get 'periods' total days including today)
+                currentPeriodStart = currentPeriodStart.minusDays(periods - 1);
+                break;
+
+            case "weekly":
+                periodStartFunc = dt -> dt.withHour(0).withMinute(0).withSecond(0).withNano(0)
+                        .minusDays(dt.getDayOfWeek().getValue() - 1); // Start of week (Monday)
+                periodEndFunc = dt -> periodStartFunc.apply(dt).plusWeeks(1);
+                periodLabelFunc = dt -> "Week " + dt.toLocalDate().toString();
+                // Move to start of current week
+                currentPeriodStart = periodStartFunc.apply(end);
+                // Move back periods-1 weeks
+                currentPeriodStart = currentPeriodStart.minusWeeks(periods - 1);
+                break;
+
+            case "monthly":
+            default:
+                periodStartFunc = dt -> dt.withDayOfMonth(1).withHour(0).withMinute(0).withSecond(0).withNano(0);
+                periodEndFunc = dt -> periodStartFunc.apply(dt).plusMonths(1);
+                periodLabelFunc = dt -> dt.getYear() + "-" + dt.getMonthValue();
+                // Move to start of current month
+                currentPeriodStart = periodStartFunc.apply(end);
+                // Move back periods-1 months
+                currentPeriodStart = currentPeriodStart.minusMonths(periods - 1);
+                break;
+        }
+
+        // Ensure we don't go before the start date
+        if (currentPeriodStart.isBefore(start)) {
+            currentPeriodStart = periodStartFunc.apply(start);
+        }
+
+        // Generate data for each period
+        LocalDateTime periodStart = currentPeriodStart;
+
+        while (!periodStart.isAfter(end)) {
+            LocalDateTime periodEnd = periodEndFunc.apply(periodStart);
+            if (periodEnd.isAfter(end)) {
+                periodEnd = end;
+            }
+
+            // Count orders in this period
+            long periodOrders = orderRepository.countByCreatedAtBetween(periodStart, periodEnd);
+
+            // Calculate revenue in this period
+            BigDecimal periodRevenue = orderRepository.findByCreatedAtBetween(periodStart, periodEnd)
+                    .stream()
+                    .filter(order -> order.getStatus() == OrderStatus.PROCESSING ||
+                            order.getStatus() == OrderStatus.OUT_FOR_DELIVERY ||
+                            order.getStatus() == OrderStatus.DELIVERED)
+                    .map(Order::getTotalAmount)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Calculate platform fees collected in this period
+            BigDecimal periodFees = orderItemRepository.findByOrderCreatedAtBetween(periodStart, periodEnd)
+                    .stream()
+                    .filter(item -> item.getStatus() == OrderItemStatus.PROCESSING ||
+                            item.getStatus() == OrderItemStatus.OUT_FOR_DELIVERY ||
+                            item.getStatus() == OrderItemStatus.DELIVERED)
+                    .map(OrderItem::getPlatformFee)
+                    .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+            // Count new users in this period
+            long newUsers = userRepository.countByJoinedDateBetween(periodStart, periodEnd);
+
+            // Add data for this period
+            Map<String, Object> trendEntry = new HashMap<>();
+            trendEntry.put("period", periodLabelFunc.apply(periodStart));
+            trendEntry.put("orders", periodOrders);
+            trendEntry.put("revenue", periodRevenue);
+            trendEntry.put("fees", periodFees);
+            trendEntry.put("newUsers", newUsers);
+            trends.add(trendEntry);
+
+            // Move to next period
+            periodStart = periodEndFunc.apply(periodStart);
+        }
+
+        return trends;
+    }
+
+    /**
+     * Gets the top selling categories within the date range
+     */
+    private List<Map<String, Object>> getTopSellingCategories(int limit, LocalDateTime start, LocalDateTime end) {
+        return orderItemRepository.findByOrderCreatedAtBetween(start, end)
+                .stream()
+                .filter(item -> item.getStatus() == OrderItemStatus.DELIVERED)
+                .filter(item -> item.getProduct() != null && item.getProduct().getCategory() != null)
+                .collect(Collectors.groupingBy(
+                        item -> item.getProduct().getCategory(),
+                        Collectors.counting()
+                ))
+                .entrySet().stream()
+                .sorted(Map.Entry.<Category, Long>comparingByValue().reversed())
+                .limit(limit)
+                .map(entry -> {
+                    Map<String, Object> categoryMap = new HashMap<>();
+                    categoryMap.put("categoryId", entry.getKey().getCategoryId());
+                    categoryMap.put("name", entry.getKey().getName());
+                    categoryMap.put("count", entry.getValue());
+                    return categoryMap;
+                })
+                .collect(Collectors.toList());
+    }
+
+    /**
+     * Gets the top selling brands within the date range
+     */
+    private List<Map<String, Object>> getTopSellingBrands(int limit, LocalDateTime start, LocalDateTime end) {
+        return orderItemRepository.findByOrderCreatedAtBetween(start, end)
+                .stream()
+                .filter(item -> item.getStatus() == OrderItemStatus.DELIVERED)
+                .filter(item -> item.getProduct() != null && item.getProduct().getBrand() != null)
+                .collect(Collectors.groupingBy(
+                        item -> item.getProduct().getBrand(),
+                        Collectors.counting()
+                ))
+                .entrySet().stream()
+                .sorted(Map.Entry.<Brand, Long>comparingByValue().reversed())
+                .limit(limit)
+                .map(entry -> {
+                    Map<String, Object> brandMap = new HashMap<>();
+                    brandMap.put("brandId", entry.getKey().getBrandId());
+                    brandMap.put("name", entry.getKey().getName());
+                    brandMap.put("count", entry.getValue());
+                    return brandMap;
+                })
+                .collect(Collectors.toList());
+    }
+    /**
+     * Webhook handlers
+     */
     @Transactional
     public void handleSuccessfulPayment(String paymentIntentId) {
         log.info("Handling successful payment for PaymentIntent: {}", paymentIntentId);
@@ -568,8 +763,8 @@ public class OrderService {
             return;
         }
 
-        log.info("Updating order {} to PAID.", order.getOrderId());
-        order.setStatus(OrderStatus.PAID);
+        log.info("Updating order {} to PROCESSING.", order.getOrderId());
+        order.setStatus(OrderStatus.PROCESSING);
         order.setPaidAt(LocalDateTime.now());
 
         order.getOrderItems().forEach(item -> {
@@ -674,13 +869,13 @@ public class OrderService {
     @Transactional
     public void cleanupExpiredPendingOrders() {
         LocalDateTime expirationTime = LocalDateTime.now().minusMinutes(30);
-        
+
         List<Order> expiredOrders = orderRepository.findByStatusAndCreatedAtBefore(
-            OrderStatus.PENDING, expirationTime);
-        
+                OrderStatus.PENDING, expirationTime);
+
         if (!expiredOrders.isEmpty()) {
             log.info("Found {} expired pending orders to clean up", expiredOrders.size());
-            
+
             for (Order order : expiredOrders) {
                 try {
                     expireOrder(order);
@@ -700,13 +895,13 @@ public class OrderService {
     @Transactional
     public void cleanupExpiredOrders() {
         LocalDateTime thirtyMinutesAgo = LocalDateTime.now().minusMinutes(30);
-        
+
         List<Order> expiredOrders = orderRepository.findByStatusAndCreatedAtBefore(
-            OrderStatus.PENDING, thirtyMinutesAgo);
-        
+                OrderStatus.PENDING, thirtyMinutesAgo);
+
         if (!expiredOrders.isEmpty()) {
             log.info("Found {} expired orders to clean up", expiredOrders.size());
-            
+
             for (Order order : expiredOrders) {
                 try {
                     expireOrder(order);
@@ -722,7 +917,7 @@ public class OrderService {
     public void expireOrder(Order order) {
         // Mark order as expired
         order.setStatus(OrderStatus.EXPIRED);
-        
+
         // Restore product availability
         for (OrderItem item : order.getOrderItems()) {
             Product product = item.getProduct();
@@ -730,11 +925,11 @@ public class OrderService {
                 product.setStatus(ProductStatus.ACTIVE);
                 product.setUpdatedAt(LocalDateTime.now());
                 productRepository.save(product);
-                
-                log.info("Restored product {} availability after order {} expiration", 
-                    product.getProductId(), order.getOrderId());
+
+                log.info("Restored product {} availability after order {} expiration",
+                        product.getProductId(), order.getOrderId());
             }
-              // Mark order item as cancelled
+            // Mark order item as cancelled
             item.setStatus(OrderItemStatus.CANCELLED);
             item.setEscrowStatus(EscrowStatus.CANCELLED); // No money involved yet
         }        // Cancel all transactions (if they exist)
@@ -750,7 +945,7 @@ public class OrderService {
                 log.debug("No transaction found for order item {} - this is normal for unpaid orders", item.getOrderItemId());
             }
         }
-        
+
         orderRepository.save(order);
         log.info("Order {} expired and cleaned up successfully", order.getOrderId());
     }
@@ -769,10 +964,10 @@ public class OrderService {
     @Transactional
     public int cleanupExpiredOrdersManually() {
         LocalDateTime thirtyMinutesAgo = LocalDateTime.now().minusMinutes(30);
-        
+
         List<Order> expiredOrders = orderRepository.findByStatusAndCreatedAtBefore(
-            OrderStatus.PENDING, thirtyMinutesAgo);
-        
+                OrderStatus.PENDING, thirtyMinutesAgo);
+
         int cleanedCount = 0;
         for (Order order : expiredOrders) {
             try {
@@ -783,12 +978,12 @@ public class OrderService {
                 log.error("Failed to manually expire order {}: {}", order.getOrderId(), e.getMessage());
             }
         }
-        
+
         log.info("Manual cleanup completed: {} orders expired", cleanedCount);
         return cleanedCount;
     }
 
-    // Private helper methods
+// Private helper methods
 
     private List<OrderItemData> validateAndProcessItems(List<OrderCreateRequest.OrderItemRequest> itemRequests, Long buyerId) {
         if (itemRequests.isEmpty()) {
@@ -803,6 +998,9 @@ public class OrderService {
 
         return itemDataList;
     }
+
+    // Data class for order processing
+
 
     private OrderItemData validateAndProcessItem(OrderCreateRequest.OrderItemRequest itemRequest, Long buyerId) {
         Product product = productRepository.findById(itemRequest.getProductId())
@@ -1008,7 +1206,7 @@ public class OrderService {
 
     private Page<Order> getSellerOrders(Long userId, String status, Pageable pageable) {
         Pageable adjustedPageable = adjustPageableForSellerOrders(pageable);
-        
+
         Page<OrderItem> sellerItems;
         if (status != null && !status.trim().isEmpty()) {
             try {
@@ -1045,65 +1243,96 @@ public class OrderService {
         }
     }
 
-    private void validateItemStatusUpdate(OrderItemStatus currentStatus, OrderItemStatus newStatus, boolean isBuyer, boolean isSeller) {
-        switch (newStatus) {
-            case SHIPPED:
-                if (!isSeller) {
-                    throw new UnauthorizedException("Only the seller can mark an item as shipped");
-                }
-                if (!OrderItemStatus.PROCESSING.equals(currentStatus)) {
-                    throw new BusinessLogicException("Item can only be shipped from processing status");
-                }
-                break;
-            case DELIVERED:
-                if (!isBuyer) {
-                    throw new UnauthorizedException("Only the buyer can confirm delivery");
-                }
-                if (!OrderItemStatus.SHIPPED.equals(currentStatus)) {
-                    throw new BusinessLogicException("Item can only be delivered from shipped status");
-                }
-                break;
-            case CANCELLED:
-                if (!isItemCancellable(currentStatus)) {
-                    throw new BusinessLogicException("Item cannot be cancelled in " + currentStatus + " status");
-                }
-                if (!isBuyer && !isSeller) {
-                    throw new UnauthorizedException("User not authorized to cancel this item");
-                }
-                break;
-            default:
-                throw new BusinessLogicException("Status " + newStatus + " cannot be set directly");
-        }
+private void validateItemStatusUpdate(OrderItemStatus currentStatus, OrderItemStatus newStatus, boolean isBuyer, boolean isSeller) {
+    // This validation is for actions performed by BUYERS and SELLERS.
+    // Shipper actions are handled in the LogisticsService and are implicitly trusted.
+    switch (newStatus) {
+        case AWAITING_PICKUP:
+            if (!isSeller) {
+                throw new UnauthorizedException("Only the seller can request pickup for an item.");
+            }
+            if (currentStatus != OrderItemStatus.PROCESSING) {
+                throw new BusinessLogicException("Cannot request pickup for an item that is not in PROCESSING status.");
+            }
+            break;
+
+        case DELIVERED:
+            if (!isBuyer) {
+                throw new UnauthorizedException("Only the buyer can confirm an item's delivery.");
+            }
+            if (currentStatus != OrderItemStatus.OUT_FOR_DELIVERY) {
+                throw new BusinessLogicException("Cannot confirm delivery for an item that is not yet out for delivery.");
+            }
+            break;
+
+        case CANCELLED:
+            if (!isItemCancellable(currentStatus)) {
+                throw new BusinessLogicException("Item cannot be cancelled in its current status: " + currentStatus);
+            }
+            if (!isBuyer && !isSeller) {
+                throw new UnauthorizedException("You are not authorized to cancel this item.");
+            }
+            break;
+
+        // These statuses are managed by the internal logistics team and cannot be set directly by buyers or sellers.
+        case IN_WAREHOUSE, OUT_FOR_DELIVERY:
+            throw new UnauthorizedException("This status can only be updated by the Vestige shipping team.");
+
+        default:
+            // Prevents direct updates to other statuses like PROCESSING, PENDING, etc.
+            throw new BusinessLogicException("The status " + newStatus + " cannot be set directly.");
     }
+}
 
     private boolean isItemCancellable(OrderItemStatus status) {
         return status == OrderItemStatus.PENDING || status == OrderItemStatus.PROCESSING;
     }
 
-    private void updateOverallOrderStatus(Order order) {
+    protected void updateOverallOrderStatus(Order order) {
         List<OrderItemStatus> itemStatuses = order.getOrderItems().stream()
                 .map(OrderItem::getStatus)
                 .toList();
 
         if (itemStatuses.isEmpty()) {
             order.setStatus(OrderStatus.CANCELLED);
+            log.warn("Order {} has no items, setting status to CANCELLED.", order.getOrderId());
             return;
         }
 
         long totalItems = itemStatuses.size();
-        long deliveredItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.DELIVERED).count();
-        long cancelledItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.CANCELLED).count();
-        long shippedItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.SHIPPED).count();
-        long processingItems = itemStatuses.stream().filter(s -> s == OrderItemStatus.PROCESSING).count();
+        long cancelledOrRefundedItems = itemStatuses.stream()
+                .filter(s -> s == OrderItemStatus.CANCELLED || s == OrderItemStatus.REFUNDED)
+                .count();
 
-        if (cancelledItems == totalItems) {
+        // If all items are cancelled or refunded, the entire order is cancelled.
+        if (cancelledOrRefundedItems == totalItems) {
             order.setStatus(OrderStatus.CANCELLED);
-        } else if (deliveredItems > 0 && deliveredItems + cancelledItems == totalItems) {
+            log.info("All items in Order {} are cancelled/refunded. Setting order status to CANCELLED.", order.getOrderId());
+            return;
+        }
+
+        // Filter out terminal statuses to find the "active" state of the order.
+        Optional<OrderItemStatus> leastAdvancedActiveStatus = itemStatuses.stream()
+                .filter(s -> s != OrderItemStatus.DELIVERED && s != OrderItemStatus.CANCELLED && s != OrderItemStatus.REFUNDED)
+                .min(Comparator.comparing(Enum::ordinal));
+
+        if (leastAdvancedActiveStatus.isPresent()) {
+            // If there are still active items, the order's status is determined by the least-progressed item.
+            OrderItemStatus minStatus = leastAdvancedActiveStatus.get();
+            switch (minStatus) {
+                case PENDING, PROCESSING, AWAITING_PICKUP, IN_WAREHOUSE ->
+                    order.setStatus(OrderStatus.PROCESSING);
+                case OUT_FOR_DELIVERY ->
+                    order.setStatus(OrderStatus.OUT_FOR_DELIVERY);
+                default ->
+                    // Fallback for any unexpected active status
+                    order.setStatus(OrderStatus.PROCESSING);
+            }
+            log.info("Order {} status updated to {} based on least advanced item status: {}", order.getOrderId(), order.getStatus(), minStatus);
+        } else {
+            // If there are no active items, it means all non-cancelled items have been delivered.
             order.setStatus(OrderStatus.DELIVERED);
-        } else if (shippedItems > 0) {
-            order.setStatus(OrderStatus.SHIPPED);
-        } else if (processingItems > 0) {
-            order.setStatus(OrderStatus.PROCESSING);
+            log.info("All active items in Order {} are delivered. Setting order status to DELIVERED.", order.getOrderId());
         }
     }
 
@@ -1136,189 +1365,753 @@ public class OrderService {
                 .filter(item -> item.getStatus() != OrderItemStatus.DELIVERED) // Can't refund delivered items
                 .map(OrderItem::getPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
+
         if (refundAmount.compareTo(maxRefundableAmount) > 0) {
             throw new BusinessLogicException(String.format(
-                "Refund amount %s exceeds maximum refundable amount %s for order %d", 
-                refundAmount, maxRefundableAmount, order.getOrderId()));
+                    "Refund amount %s exceeds maximum refundable amount %s for order %d",
+                    refundAmount, maxRefundableAmount, order.getOrderId()));
         }
-        
+
         if (refundAmount.compareTo(BigDecimal.ZERO) <= 0) {
             throw new BusinessLogicException("Refund amount must be greater than zero");
         }
     }
+protected OrderDetailResponse convertToDetailResponse(Order order) {
+    return orderMapper.convertToDetailResponse(order);
+}
 
-    /**
-     * Calculate total amount already refunded for an order
-     */
-    private BigDecimal getTotalRefundedAmount(Order order) {
-        // This would need to track refunds in a separate table or in transaction records
-        // For now, return zero - this should be implemented based on your refund tracking strategy
-        return BigDecimal.ZERO;
-    }    // Response conversion methods
-    private OrderDetailResponse convertToDetailResponse(Order order) {
-        Map<String, List<OrderDetailResponse.OrderItemDetail>> itemsBySeller = order.getOrderItems().stream()
-                .map(this::convertToOrderItemDetail)
-                .collect(Collectors.groupingBy(item -> item.getSeller().getUserId().toString()));
+private OrderListResponse convertToListResponse(Order order) {
+    return orderMapper.convertToListResponse(order);
+}
 
-        List<OrderDetailResponse.OrderItemDetail> itemDetails = order.getOrderItems().stream()
-                .map(this::convertToOrderItemDetail)
-                .collect(Collectors.toList());
-
-        return OrderDetailResponse.builder()
-                .orderId(order.getOrderId())
-                .status(order.getStatus().name())
-                .totalAmount(order.getTotalAmount())
-                .totalShippingFee(BigDecimal.ZERO)
-                .totalPlatformFee(calculateTotalPlatformFee(order))
-                .totalItems(order.getOrderItems().size())
-                .uniqueSellers(itemsBySeller.size())
-                .createdAt(order.getCreatedAt())
-                .paidAt(order.getPaidAt())
-                .shippedAt(order.getShippedAt())
-                .deliveredAt(order.getDeliveredAt())
-                .stripePaymentIntentId(order.getStripePaymentIntentId())                .orderItems(itemDetails)
-                .shippingAddress(convertToShippingAddressInfo(order.getShippingAddress()))
-                .itemsBySeller(itemsBySeller)
-                .build();
+/**
+ * Check the current status of a payment for debugging purposes
+ */
+public String checkPaymentStatus(String paymentIntentId) {
+    if (paymentIntentId == null || paymentIntentId.isEmpty()) {
+        throw new BusinessLogicException("Payment intent ID is required");
     }
 
-    private OrderListResponse convertToListResponse(Order order) {
-        List<OrderListResponse.OrderItemSummary> itemSummaries = order.getOrderItems().stream()
-            .map(this::convertToOrderItemSummary)
+    try {
+        return stripeService.getPaymentIntentStatus(paymentIntentId);
+    } catch (Exception e) {
+        log.error("Failed to check payment status for payment intent {}: {}", paymentIntentId, e.getMessage());
+        throw new BusinessLogicException("Failed to check payment status: " + e.getMessage());
+    }
+}
+
+@Transactional
+public OrderDetailResponse simulatePaymentCompletion(Long orderId, Long buyerId, String paymentIntentId) {
+    log.warn("SIMULATING PAYMENT for order {} with paymentIntentId {}", orderId, paymentIntentId);
+
+    Order order = getOrderWithValidation(orderId, buyerId, true);
+
+    if (order.getStatus() != OrderStatus.PENDING) {
+        throw new BusinessLogicException("Order is not in pending status");
+    }
+
+    // Update order to PROCESSING status
+    order.setStripePaymentIntentId(paymentIntentId);
+    order.setStatus(OrderStatus.PROCESSING);
+    order.setPaidAt(LocalDateTime.now());
+
+    // Update order items to PROCESSING and update product status
+    order.getOrderItems().forEach(item -> {
+        if (item.getStatus() == OrderItemStatus.PENDING) {
+            item.setStatus(OrderItemStatus.PROCESSING);
+            item.setEscrowStatus(EscrowStatus.HOLDING);
+
+            Product product = item.getProduct();
+            product.setStatus(ProductStatus.SOLD);
+            product.setSoldAt(LocalDateTime.now());
+            productRepository.save(product);
+        }
+    });
+
+    // Update transaction escrow status
+    for (OrderItem item : order.getOrderItems()) {
+        Transaction transaction = getTransactionForOrderItem(item.getOrderItemId());
+        transaction.setEscrowStatus(EscrowStatus.HOLDING);
+        transactionRepository.save(transaction);
+    }
+
+    order = orderRepository.save(order);
+    log.warn("SIMULATED PAYMENT COMPLETED for order {}", orderId);
+
+    return convertToDetailResponse(order);
+}
+
+/**
+ * Helper method to clean payment intent ID by removing client_secret part if present
+ */
+private String cleanPaymentIntentId(String rawPaymentIntentId) {
+    if (rawPaymentIntentId == null) {
+        return null;
+    }
+
+    // Payment intent IDs might be in format "pi_123456_secret_789012"
+    // We only need the "pi_123456" part
+    int underscoreSecretIndex = rawPaymentIntentId.indexOf("_secret_");
+    if (underscoreSecretIndex > 0) {
+        return rawPaymentIntentId.substring(0, underscoreSecretIndex);
+    }
+
+    return rawPaymentIntentId;
+}
+
+/**
+ * Admin method to get paginated list of all transactions with comprehensive filtering options
+ * For admin dashboard display
+ */
+@Transactional(readOnly = true)
+public PagedResponse<Object> getAllTransactionsForAdmin(
+        String status, String escrowStatus, Long buyerId, Long sellerId,
+        LocalDateTime startDate, LocalDateTime endDate, String search, Pageable pageable) {
+
+    // Use specification pattern for complex filtering
+    Page<Transaction> transactions = transactionRepository.findAll((root, query, criteriaBuilder) -> {
+        // Add JOIN FETCH for required relationships
+        root.fetch("orderItem", JoinType.LEFT);
+        root.fetch("buyer", JoinType.LEFT);
+        root.fetch("seller", JoinType.LEFT);
+
+        // Make the query DISTINCT to avoid duplicates from JOIN FETCH
+        query.distinct(true);
+
+        List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
+
+        // Filter by transaction status
+        if (status != null && !status.trim().isEmpty()) {
+            try {
+                TransactionStatus transactionStatus = TransactionStatus.valueOf(status.toUpperCase());
+                predicates.add(criteriaBuilder.equal(root.get("status"), transactionStatus));
+            } catch (IllegalArgumentException e) {
+                // Invalid status - return empty result
+                predicates.add(criteriaBuilder.disjunction());
+            }
+        }
+
+        // Filter by escrow status
+        if (escrowStatus != null && !escrowStatus.trim().isEmpty()) {
+            try {
+                EscrowStatus escrowStatusEnum = EscrowStatus.valueOf(escrowStatus.toUpperCase());
+                predicates.add(criteriaBuilder.equal(root.get("escrowStatus"), escrowStatusEnum));
+            } catch (IllegalArgumentException e) {
+                // Invalid status - return empty result
+                predicates.add(criteriaBuilder.disjunction());
+            }
+        }
+
+        // Filter by buyer ID
+        if (buyerId != null) {
+            predicates.add(criteriaBuilder.equal(root.get("buyer").get("userId"), buyerId));
+        }
+
+        // Filter by seller ID
+        if (sellerId != null) {
+            predicates.add(criteriaBuilder.equal(root.get("seller").get("userId"), sellerId));
+        }
+
+        // Filter by date range
+        if (startDate != null) {
+            predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), startDate));
+        }
+        if (endDate != null) {
+            predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("createdAt"), endDate));
+        }
+
+        // Search functionality (search in tracking number, dispute reason, etc.)
+        if (search != null && !search.trim().isEmpty()) {
+            String searchPattern = "%" + search.toLowerCase() + "%";
+            jakarta.persistence.criteria.Predicate searchPredicate = criteriaBuilder.or(
+                    criteriaBuilder.like(
+                            criteriaBuilder.lower(root.get("trackingNumber")),
+                            searchPattern
+                    ),
+                    criteriaBuilder.like(
+                            criteriaBuilder.lower(root.get("disputeReason")),
+                            searchPattern
+                    ),
+                    criteriaBuilder.like(
+                            criteriaBuilder.lower(root.get("buyer").get("username")),
+                            searchPattern
+                    ),
+                    criteriaBuilder.like(
+                            criteriaBuilder.lower(root.get("seller").get("username")),
+                            searchPattern
+                    )
+            );
+            predicates.add(searchPredicate);
+        }
+
+        return criteriaBuilder.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+    }, pageable);
+
+    // Map to response DTOs
+    List<Object> transactionResponses = transactions.getContent().stream()
+            .map(transaction -> {
+                // Get related order item and product info
+                OrderItem orderItem = transaction.getOrderItem();
+                Product product = orderItem != null ? orderItem.getProduct() : null;
+
+                // Create nested maps
+                Map<String, Object> buyerMap = new HashMap<>();
+                buyerMap.put("userId", transaction.getBuyer().getUserId());
+                buyerMap.put("username", transaction.getBuyer().getUsername());
+
+                Map<String, Object> sellerMap = new HashMap<>();
+                sellerMap.put("userId", transaction.getSeller().getUserId());
+                sellerMap.put("username", transaction.getSeller().getUsername());
+
+                Map<String, Object> orderMap = new HashMap<>();
+                orderMap.put("orderId", orderItem != null ? orderItem.getOrder().getOrderId() : null);
+                orderMap.put("orderItemId", orderItem != null ? orderItem.getOrderItemId() : null);
+
+                Map<String, Object> productMap = null;
+                if (product != null) {
+                    productMap = new HashMap<>();
+                    productMap.put("productId", product.getProductId());
+                    productMap.put("title", product.getTitle());
+                }
+
+                Map<String, Object> trackingMap = new HashMap<>();
+                trackingMap.put("trackingNumber", transaction.getTrackingNumber());
+                trackingMap.put("trackingUrl", transaction.getTrackingUrl());
+                trackingMap.put("shippedAt", transaction.getShippedAt());
+                trackingMap.put("deliveredAt", transaction.getDeliveredAt());
+
+                Map<String, Object> stripeMap = new HashMap<>();
+                stripeMap.put("paymentIntentId", transaction.getStripePaymentIntentId());
+                stripeMap.put("transferId", transaction.getStripeTransferId());
+
+                Map<String, Object> disputeMap = new HashMap<>();
+                disputeMap.put("status", transaction.getDisputeStatus());
+                disputeMap.put("reason", transaction.getDisputeReason());
+
+                // Create and populate the main response map
+                Map<String, Object> responseMap = new HashMap<>();
+                responseMap.put("transactionId", transaction.getTransactionId());
+                responseMap.put("status", transaction.getStatus());
+                responseMap.put("escrowStatus", transaction.getEscrowStatus());
+                responseMap.put("amount", transaction.getAmount());
+                responseMap.put("platformFee", transaction.getPlatformFee());
+                responseMap.put("createdAt", transaction.getCreatedAt());
+                responseMap.put("buyer", buyerMap);
+                responseMap.put("seller", sellerMap);
+                responseMap.put("order", orderMap);
+                responseMap.put("product", productMap);
+                responseMap.put("tracking", trackingMap);
+                responseMap.put("stripe", stripeMap);
+                responseMap.put("dispute", disputeMap);
+
+                return responseMap;
+            })
             .collect(Collectors.toList());
 
-        String overallEscrowStatus = calculateOverallEscrowStatus(order);
-        log.debug("Order {} - Overall escrow status calculated as: {}", order.getOrderId(), overallEscrowStatus);
+    return PagedResponse.of(
+            new PageImpl<>(transactionResponses, pageable, transactions.getTotalElements())
+    );
+}
 
-        return OrderListResponse.builder()
-            .orderId(order.getOrderId())
-            .status(order.getStatus().name())
-            .totalAmount(order.getTotalAmount())
-            .totalShippingFee(BigDecimal.ZERO)
-            .totalItems(order.getOrderItems().size())
-            .uniqueSellers((int) order.getOrderItems().stream()
-                .map(item -> item.getSeller().getUserId())
-                .distinct().count())
-            .createdAt(order.getCreatedAt())
-            .paidAt(order.getPaidAt())
-            .deliveredAt(order.getDeliveredAt())
-            .totalPlatformFee(calculateTotalPlatformFee(order))
-            .itemSummaries(itemSummaries)
-            .overallEscrowStatus(overallEscrowStatus)
-            .build();
-    }private OrderDetailResponse.OrderItemDetail convertToOrderItemDetail(OrderItem orderItem) {
-        log.debug("Converting order item {} - status: {}, escrowStatus: {}", 
-            orderItem.getOrderItemId(), orderItem.getStatus(), orderItem.getEscrowStatus());
-        
-        return OrderDetailResponse.OrderItemDetail.builder()
-            .orderItemId(orderItem.getOrderItemId())
-            .price(orderItem.getPrice())
-            .platformFee(orderItem.getPlatformFee())
-            .feePercentage(orderItem.getFeePercentage())
-            .status(orderItem.getStatus().name())
-            .escrowStatus(orderItem.getEscrowStatus().name())
-            .product(convertToProductInfo(orderItem.getProduct()))
-            .seller(convertToSellerInfo(orderItem.getSeller()))
-            .transaction(convertToTransactionInfo(orderItem))
-            .build();
-    }    private OrderListResponse.OrderItemSummary convertToOrderItemSummary(OrderItem orderItem) {
-        // Get primary image URL from product
-        String primaryImageUrl = null;
-        try {
-            if (orderItem.getProduct() != null && 
-                orderItem.getProduct().getImages() != null && 
-                !orderItem.getProduct().getImages().isEmpty()) {
-                primaryImageUrl = orderItem.getProduct().getImages().get(0).getImageUrl();
-                log.debug("Product {} has {} images, primary image: {}", 
-                    orderItem.getProduct().getProductId(), 
-                    orderItem.getProduct().getImages().size(), 
-                    primaryImageUrl);
-            } else {
-                log.debug("Product {} has no images loaded", 
-                    orderItem.getProduct() != null ? orderItem.getProduct().getProductId() : "null");
+/**
+ * Admin method to get transactions that require attention
+ */
+@Transactional(readOnly = true)
+public Object getProblemTransactions() {
+    // Find transactions with issues
+    List<Transaction> disputedTransactions = transactionRepository.findByDisputeStatusNot(DisputeStatus.NONE);
+    List<Transaction> transferFailedTransactions = transactionRepository.findByEscrowStatus(EscrowStatus.TRANSFER_FAILED);
+
+    // Find stuck escrows (delivered for more than 14 days but escrow still not released)
+    LocalDateTime fourteenDaysAgo = LocalDateTime.now().minusDays(14);
+    List<Transaction> stuckEscrowTransactions = transactionRepository.findByStatusAndDeliveredAtBeforeAndEscrowStatus(
+            TransactionStatus.DELIVERED,
+            fourteenDaysAgo,
+            EscrowStatus.HOLDING
+    );
+
+    // Format response
+    Map<String, Object> result = new HashMap<>();
+    result.put("disputed", disputedTransactions.stream()
+            .map(orderMapper::formatTransactionSummary)
+            .collect(Collectors.toList()));
+
+    result.put("transferFailed", transferFailedTransactions.stream()
+            .map(orderMapper::formatTransactionSummary)
+            .collect(Collectors.toList()));
+
+    result.put("stuckEscrows", stuckEscrowTransactions.stream()
+            .map(orderMapper::formatTransactionSummary)
+            .collect(Collectors.toList()));
+
+    return result;
+}
+
+/**
+ * Format transaction summary for problem transactions - delegated to OrderMapper
+ */
+private Map<String, Object> formatTransactionSummary(Transaction transaction) {
+    return orderMapper.formatTransactionSummary(transaction);
+}
+
+/**
+ * Admin method to manually release funds from escrow to seller for a specific transaction
+ */
+@Transactional
+public void forceReleaseEscrow(Long transactionId, String notes, Long adminId) {
+    Transaction transaction = transactionRepository.findById(transactionId)
+            .orElseThrow(() -> new ResourceNotFoundException("Transaction not found with ID: " + transactionId));
+
+    if (transaction.getEscrowStatus() != EscrowStatus.HOLDING) {
+        throw new BusinessLogicException("Cannot release escrow: current status is " + transaction.getEscrowStatus());
+    }
+
+    try {
+        // Attempt transfer to seller
+        BigDecimal sellerAmount = transaction.getAmount().subtract(transaction.getPlatformFee());
+        User seller = transaction.getSeller();
+
+        // If seller has Stripe account, initiate transfer
+        if (seller.getStripeAccountId() != null) {
+            String transferId = stripeService.transferToSeller(
+                    sellerAmount,
+                    seller.getStripeAccountId(),
+                    transaction.getTransactionId()
+            );
+            transaction.setStripeTransferId(transferId);
+            log.info("Admin {} force released escrow for transaction {}. Transfer ID: {}",
+                    adminId, transactionId, transferId);
+        } else {
+            log.warn("Admin {} force released escrow for transaction {} but seller has no Stripe account",
+                    adminId, transactionId);
+        }
+
+        // Update escrow status regardless of transfer outcome
+        transaction.setEscrowStatus(EscrowStatus.RELEASED);
+        transaction = transactionRepository.save(transaction);
+
+        log.info("Admin {} successfully force released escrow for transaction {}", adminId, transactionId);
+    } catch (Exception e) {
+        log.error("Admin escrow release failed for transaction {}: {}", transactionId, e.getMessage());
+        throw new BusinessLogicException("Escrow release failed: " + e.getMessage());
+    }
+}
+
+/**
+ * Adjust pageable for seller orders to handle potential multiplicity issues
+ * We fetch more items to account for filtering them by order
+ */
+private Pageable adjustPageableForSellerOrders(Pageable pageable) {
+    // Increase page size to account for filtering, but keep original page number
+    int adjustedSize = pageable.getPageSize() * 3; // Fetch more items to account for grouping
+
+    // Create new pageable with same sort but larger page size
+    return PageRequest.of(
+            pageable.getPageNumber(),
+            adjustedSize,
+            pageable.getSort()
+    );
+}
+
+/**
+ * Load product images separately to avoid MultipleBagFetchException
+ * Spring Data JPA cannot fetch multiple collection relationships in a single query
+ */
+private void loadProductImagesForOrders(List<Order> orders) {
+    if (orders == null || orders.isEmpty()) {
+        return;
+    }
+
+    // Collect all products from order items
+    List<Long> productIds = orders.stream()
+            .flatMap(order -> order.getOrderItems().stream())
+            .map(orderItem -> orderItem.getProduct().getProductId())
+            .distinct()
+            .collect(Collectors.toList());
+
+    if (!productIds.isEmpty()) {
+        // Fetch all products with their images in a separate query
+        List<Product> productsWithImages = productRepository.findByProductIdInWithImages(productIds);
+
+        // Create a map for faster lookup
+        Map<Long, Product> productMap = productsWithImages.stream()
+                .collect(Collectors.toMap(Product::getProductId, Function.identity()));
+
+        // Replace product references in order items with the ones that have images loaded
+        for (Order order : orders) {
+            for (OrderItem orderItem : order.getOrderItems()) {
+                Product productWithImages = productMap.get(orderItem.getProduct().getProductId());
+                if (productWithImages != null) {
+                    orderItem.setProduct(productWithImages);
+                }
             }
-        } catch (Exception e) {
-            log.warn("Failed to load images for product {}: {}", 
-                orderItem.getProduct() != null ? orderItem.getProduct().getProductId() : "null", 
-                e.getMessage());
-        }
-        
-        return OrderListResponse.OrderItemSummary.builder()
-            .productId(orderItem.getProduct().getProductId())
-            .productTitle(orderItem.getProduct().getTitle())
-            .productImage(primaryImageUrl)
-            .price(orderItem.getPrice())
-            .sellerUsername(orderItem.getSeller().getUsername())
-            .sellerIsLegitProfile(orderItem.getSeller().getIsLegitProfile())
-            .escrowStatus(orderItem.getEscrowStatus().name())
-            .itemStatus(orderItem.getStatus().name())
-            .build();
-    }
-
-    private OrderDetailResponse.ProductInfo convertToProductInfo(Product product) {
-        String primaryImageUrl = null;
-        if (!product.getImages().isEmpty()) {
-            primaryImageUrl = product.getImages().get(0).getImageUrl();
         }
 
-        return OrderDetailResponse.ProductInfo.builder()
-            .productId(product.getProductId())
-            .title(product.getTitle())
-            .description(product.getDescription())
-            .condition(product.getCondition().name())
-            .size(product.getSize())
-            .color(product.getColor())
-            .primaryImageUrl(primaryImageUrl)
-            .shippingFee(BigDecimal.ZERO)
-            .categoryId(product.getCategory() != null ? product.getCategory().getCategoryId() : null)
-            .categoryName(product.getCategory() != null ? product.getCategory().getName() : null)
-            .brandId(product.getBrand() != null ? product.getBrand().getBrandId() : null)
-            .brandName(product.getBrand() != null ? product.getBrand().getName() : null)
-            .build();
+        log.debug("Loaded images for {} products", productsWithImages.size());
+    }
+}
+
+/**
+ * Admin-only method to update any order regardless of normal business rules
+ *
+ * @param userId User ID who owns the order
+ * @param orderId Order ID to update
+ * @param status New status to set
+ * @param notes Admin notes about the change
+ * @param forceUpdate Whether to bypass business rules
+ * @param adminId Admin user ID making the change
+ * @return Updated order details
+ */
+@Transactional
+public OrderDetailResponse adminUpdateUserOrder(Long userId, Long orderId, String status,
+                                                String notes, boolean forceUpdate, Long adminId) {
+    // Find the order
+    Order order = orderRepository.findById(orderId)
+            .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + orderId));
+
+    // Validate that the order belongs to the specified user
+    if (!order.getBuyer().getUserId().equals(userId)) {
+        throw new UnauthorizedException("Order does not belong to specified user");
     }
 
-    private OrderDetailResponse.SellerInfo convertToSellerInfo(User seller) {
-        return OrderDetailResponse.SellerInfo.builder()
-            .userId(seller.getUserId())
-            .username(seller.getUsername())
-            .firstName(seller.getFirstName())
-            .lastName(seller.getLastName())
-            .isLegitProfile(seller.getIsLegitProfile())
-            .sellerRating(seller.getSellerRating())
-            .sellerReviewsCount(seller.getSellerReviewsCount())
-            .build();
-    }    private OrderDetailResponse.TransactionInfo convertToTransactionInfo(OrderItem orderItem) {
-        Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
-        return OrderDetailResponse.TransactionInfo.builder()
-            .transactionId(transaction.getTransactionId())
-            .trackingNumber(transaction.getTrackingNumber())
-            .trackingUrl(transaction.getTrackingUrl())
-            .shippedAt(transaction.getShippedAt())
-            .deliveredAt(transaction.getDeliveredAt())
-            .buyerProtectionEligible(true)
-            .build();
+    // Get admin user for audit logs
+    User admin = userRepository.findById(adminId)
+            .orElseThrow(() -> new ResourceNotFoundException("Admin user not found with ID: " + adminId));
+
+    // Parse the target status
+    OrderStatus targetStatus;
+    try {
+        targetStatus = OrderStatus.valueOf(status.toUpperCase());
+    } catch (IllegalArgumentException e) {
+        throw new BusinessLogicException("Invalid order status: " + status);
     }
 
-    private OrderDetailResponse.ShippingAddressInfo convertToShippingAddressInfo(UserAddress address) {
-        return OrderDetailResponse.ShippingAddressInfo.builder()
-            .addressId(address.getAddressId())
-            .addressLine1(address.getAddressLine1())
-            .addressLine2(address.getAddressLine2())
-            .city(address.getCity())
-            .state(address.getState())
-            .postalCode(address.getPostalCode())
-            .country(address.getCountry())
-            .build();
+    // Current status for logging
+    OrderStatus currentStatus = order.getStatus();
+
+    // Validate status transition if not forcing update
+    if (!forceUpdate) {
+        validateStatusTransition(currentStatus, targetStatus);
     }
 
-    private BigDecimal calculateTotalPlatformFee(Order order) {
-        return order.getOrderItems().stream()
-            .map(OrderItem::getPlatformFee)
-            .reduce(BigDecimal.ZERO, BigDecimal::add);
+    // Perform status-specific actions
+    switch (targetStatus) {
+        case PROCESSING:
+            if (order.getPaidAt() == null) {
+                order.setPaidAt(LocalDateTime.now());
+            }
+            break;
+
+        case OUT_FOR_DELIVERY:
+            // Update all order items to out for delivery status
+            if (order.getShippedAt() == null) {
+                order.setShippedAt(LocalDateTime.now());
+            }
+            break;
+
+        case DELIVERED:
+            if (order.getDeliveredAt() == null) {
+                order.setDeliveredAt(LocalDateTime.now());
+            }
+            break;
+
+        case CANCELLED:
+            // Handle cancellation if it was previously paid and processed
+            if (currentStatus == OrderStatus.PROCESSING ||
+                    currentStatus == OrderStatus.OUT_FOR_DELIVERY) {
+                // Initiate refund process if order was paid
+                if (order.getStripePaymentIntentId() != null) {
+                    try {
+                        // Create refund amount for full order total
+                        BigDecimal refundAmount = order.getTotalAmount();
+                        stripeService.refundPayment(order.getStripePaymentIntentId(), refundAmount);
+                    } catch (Exception e) {
+                        if (!forceUpdate) {
+                            throw new BusinessLogicException("Failed to process refund: " + e.getMessage() +
+                                    ". Use forceUpdate=true to bypass refund check.");
+                        }
+                        // Log the error but proceed if forceUpdate is true
+                        log.error("Failed to process refund for forced order cancellation. Order ID: {}, Error: {}",
+                                orderId, e.getMessage());
+                    }
+                }
+            }
+            break;
+
+        default:
+            // No special action for other statuses
+            break;
     }
 
-    // Data class for order processing
+    // Update order status
+    order.setStatus(targetStatus);
+
+    // Save order
+    order = orderRepository.save(order);
+
+    if (forceUpdate) {
+        OrderItemStatus itemStatus = mapOrderToItemStatus(targetStatus);
+
+        for (OrderItem item : order.getOrderItems()) {
+            item.setStatus(itemStatus);
+
+            // Update related transaction if it exists
+            transactionRepository.findByOrderItemOrderItemId(item.getOrderItemId()).ifPresent(transaction -> updateTransactionForItemStatus(transaction, itemStatus, notes, admin.getUsername()));
+
+            orderItemRepository.save(item);
+        }
+    }
+
+    // Log the admin action
+    log.info("Admin {} force updated order {} from status {} to {}. Force update: {}",
+            adminId, orderId, currentStatus, targetStatus, forceUpdate);
+
+    // Load product images to avoid MultipleBagFetchException
+    loadProductImagesForOrders(List.of(order));
+
+    // Return updated order details
+    return orderMapper.convertToDetailResponse(order);
+}
+
+/**
+ * Maps an order status to the corresponding order item status
+ */
+    private OrderItemStatus mapOrderToItemStatus(OrderStatus orderStatus) {
+        switch (orderStatus) {
+            case PENDING:
+                return OrderItemStatus.PENDING;
+            case PROCESSING:
+                return OrderItemStatus.PROCESSING;
+            case OUT_FOR_DELIVERY:  // Keep this case for backward compatibility with OrderStatus enum
+                return OrderItemStatus.OUT_FOR_DELIVERY;
+            case DELIVERED:
+                return OrderItemStatus.DELIVERED;
+            case CANCELLED:
+                return OrderItemStatus.CANCELLED;
+            case REFUNDED:
+                return OrderItemStatus.REFUNDED;
+            default:
+                return OrderItemStatus.PENDING;
+        }
+    }
+
+    /**
+     * Updates transaction data based on the new order item status
+     */
+    private void updateTransactionForItemStatus(Transaction transaction, OrderItemStatus status,
+                                                String notes, String adminUsername) {
+        switch (status) {
+            case OUT_FOR_DELIVERY:
+                transaction.setShippedAt(LocalDateTime.now());
+                transaction.setStatus(TransactionStatus.SHIPPED); // Keep the TransactionStatus as SHIPPED for now
+                break;
+
+            case DELIVERED:
+                transaction.setDeliveredAt(LocalDateTime.now());
+                transaction.setStatus(TransactionStatus.DELIVERED);
+                // Set escrow status to RELEASED after delivery
+                transaction.setEscrowStatus(EscrowStatus.RELEASED);
+                break;
+
+            case CANCELLED:
+                transaction.setStatus(TransactionStatus.CANCELLED);
+                // Reset escrow status for cancelled transactions
+                transaction.setEscrowStatus(EscrowStatus.REFUNDED);
+                break;
+
+            case REFUNDED:
+                transaction.setStatus(TransactionStatus.REFUNDED);
+                transaction.setEscrowStatus(EscrowStatus.REFUNDED);
+                break;
+
+            default:
+                // No change for other statuses
+                break;
+        }
+    }
+
+    /**
+     * Validates that the status transition is allowed according to business rules
+     */
+    private void validateStatusTransition(OrderStatus currentStatus, OrderStatus targetStatus) {
+        // Define valid transitions
+        Map<OrderStatus, List<OrderStatus>> validTransitions = Map.of(
+                OrderStatus.PENDING, List.of(OrderStatus.PROCESSING, OrderStatus.CANCELLED, OrderStatus.EXPIRED),
+                OrderStatus.PROCESSING, List.of(OrderStatus.OUT_FOR_DELIVERY, OrderStatus.CANCELLED, OrderStatus.REFUNDED),
+                OrderStatus.OUT_FOR_DELIVERY, List.of(OrderStatus.DELIVERED, OrderStatus.CANCELLED, OrderStatus.REFUNDED),
+
+                OrderStatus.DELIVERED, List.of(OrderStatus.REFUNDED),
+                OrderStatus.CANCELLED, List.of(),
+                OrderStatus.REFUNDED, List.of()
+        );
+
+        // Check if transition is valid
+        if (!validTransitions.getOrDefault(currentStatus, List.of()).contains(targetStatus) &&
+                currentStatus != targetStatus) {
+            throw new BusinessLogicException(
+                    "Invalid status transition from " + currentStatus + " to " + targetStatus +
+                            ". Use forceUpdate=true to bypass this check."
+            );
+        }
+    }
+
+    /**
+     * Admin-only method to get all users with their order summary statistics
+     *
+     * @param search Optional search term to filter by username or email
+     * @param accountStatus Optional filter for account status (active/inactive)
+     * @param pageable Pagination and sorting parameters
+     * @return Paginated list of users with their order statistics
+     */
+    public PagedResponse<Object> getAllUsersWithOrderSummary(String search, String accountStatus, Pageable pageable) {
+        Page<User> usersPage;
+
+        if (search != null && !search.isEmpty() && accountStatus != null && !accountStatus.isEmpty()) {
+            // Filter by both search term and account status
+            usersPage = userRepository.findByUsernameContainingOrEmailContainingAndAccountStatus(
+                    search, search, accountStatus, pageable);
+        } else if (search != null && !search.isEmpty()) {
+            // Filter by search term only
+            usersPage = userRepository.findByUsernameContainingOrEmailContaining(search, search, pageable);
+        } else if (accountStatus != null && !accountStatus.isEmpty()) {
+            // Filter by account status only
+            usersPage = userRepository.findByAccountStatus(accountStatus, pageable);
+        } else {
+            // No filters
+            usersPage = userRepository.findAll(pageable);
+        }
+
+        // Process each user to add order summary
+        List<Object> userSummaries = usersPage.getContent().stream()
+                .map(this::buildUserOrderSummary)
+                .map(map -> (Object) map)
+                .collect(Collectors.toList());
+
+        // Create paged response with explicit Object type
+        Page<Object> objectPage = new PageImpl<>(userSummaries, pageable, usersPage.getTotalElements());
+        return PagedResponse.of(objectPage);
+    }
+
+    /**
+     * Builds a summary of order statistics for a user
+     */
+    private Map<String, Object> buildUserOrderSummary(User user) {
+        // Get all orders where user is buyer
+        List<Order> buyerOrders = orderRepository.findByBuyerUserId(user.getUserId());
+
+        // Count orders by status for this buyer
+        Map<OrderStatus, Long> buyerStatusCounts = Arrays.stream(OrderStatus.values())
+                .collect(Collectors.toMap(
+                        status -> status,
+                        status -> buyerOrders.stream().filter(o -> o.getStatus() == status).count(),
+                        (existing, replacement) -> existing,
+                        LinkedHashMap::new
+                ));
+
+        // Calculate total spent as buyer
+        BigDecimal totalSpent = buyerOrders.stream()
+                .filter(o -> o.getStatus() == OrderStatus.PROCESSING ||
+                        o.getStatus() == OrderStatus.OUT_FOR_DELIVERY ||
+                        o.getStatus() == OrderStatus.DELIVERED)
+                .map(Order::getTotalAmount)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Get all order items where user is seller
+        List<OrderItem> sellerItems = orderItemRepository.findBySellerUserId(user.getUserId());
+
+        // Count items by status for this seller
+        Map<OrderItemStatus, Long> sellerStatusCounts = Arrays.stream(OrderItemStatus.values())
+                .collect(Collectors.toMap(
+                        status -> status,
+                        status -> sellerItems.stream().filter(i -> i.getStatus() == status).count(),
+                        (existing, replacement) -> existing,
+                        LinkedHashMap::new
+                ));
+
+        // Calculate total earned as seller (minus platform fees)
+        BigDecimal totalEarned = sellerItems.stream()
+                .filter(i -> i.getStatus() == OrderItemStatus.PROCESSING ||
+                        i.getStatus() == OrderItemStatus.OUT_FOR_DELIVERY ||
+                        i.getStatus() == OrderItemStatus.DELIVERED)
+                .map(i -> i.getPrice().subtract(i.getPlatformFee()))
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        // Get date of last order (as buyer)
+        LocalDateTime lastOrderDate = buyerOrders.stream()
+                .map(Order::getCreatedAt)
+                .max(LocalDateTime::compareTo)
+                .orElse(null);
+
+        // Get date of last sale (as seller)
+        LocalDateTime lastSaleDate = sellerItems.stream()
+                .map(i -> i.getOrder().getCreatedAt())
+                .max(LocalDateTime::compareTo)
+                .orElse(null);
+
+        // Build and return the summary
+        Map<String, Object> summary = new LinkedHashMap<>();
+
+        // User information
+        summary.put("userId", user.getUserId());
+        summary.put("username", user.getUsername());
+        summary.put("email", user.getEmail());
+        summary.put("firstName", user.getFirstName());
+        summary.put("lastName", user.getLastName());
+        summary.put("profilePictureUrl", user.getProfilePictureUrl());
+        summary.put("accountStatus", user.getAccountStatus());
+        summary.put("isVerified", user.getIsVerified());
+        summary.put("joinedDate", user.getJoinedDate());
+        summary.put("lastLoginAt", user.getLastLoginAt());
+
+        // Buyer statistics
+        Map<String, Object> buyerMap = new HashMap<>();
+        buyerMap.put("totalOrders", buyerOrders.size());
+        buyerMap.put("totalSpent", totalSpent);
+        buyerMap.put("lastOrderDate", lastOrderDate);
+        buyerMap.put("statusCounts", buyerStatusCounts);
+        summary.put("buyer", buyerMap);
+
+        // Seller statistics
+        Map<String, Object> sellerMap = new HashMap<>();
+        sellerMap.put("totalItems", sellerItems.size());
+        sellerMap.put("totalEarned", totalEarned);
+        sellerMap.put("lastSaleDate", lastSaleDate);
+        sellerMap.put("statusCounts", sellerStatusCounts);
+        sellerMap.put("rating", user.getSellerRating());
+        sellerMap.put("reviewsCount", user.getSellerReviewsCount());
+        summary.put("seller", sellerMap);
+
+        return summary;
+    }
+
+    /**
+     * Parse a date string in ISO format to LocalDateTime
+     * Supports both date-only strings (yyyy-MM-dd) and full datetime strings (yyyy-MM-ddTHH:mm:ss)
+     *
+     * @param dateStr Date string in ISO format
+     * @return Parsed LocalDateTime object
+     */
+    public LocalDateTime parseDateTime(String dateStr) {
+        if (dateStr == null || dateStr.isEmpty()) {
+            return null;
+        }
+
+        try {
+            // Check if it's date-only format
+            if (!dateStr.contains("T")) {
+                // If date only, set to beginning of day
+                return LocalDate.parse(dateStr).atStartOfDay();
+            }
+
+            // Otherwise parse as full datetime
+            return LocalDateTime.parse(dateStr);
+        } catch (DateTimeParseException e) {
+            log.error("Failed to parse date string: {}", dateStr);
+            throw new BusinessLogicException("Invalid date format: " + dateStr +
+                    ". Expected format: yyyy-MM-dd or yyyy-MM-ddTHH:mm:ss");
+        }
+    }
+
     @Data
     @Builder
     @NoArgsConstructor
@@ -1332,848 +2125,27 @@ public class OrderService {
         private String notes;
     }
 
-    /**
-     * Utility method to clean PaymentIntent ID by removing surrounding quotes and whitespace
-     * This handles cases where the frontend sends the ID with JSON string quotes
-     */    private String cleanPaymentIntentId(String paymentIntentId) {
-        if (paymentIntentId == null) {
-            return null;
-        }
-        
-        // Remove surrounding quotes and trim whitespace
-        String cleanedId = paymentIntentId.trim();
-        
-        // Remove surrounding double quotes if present
-        if (cleanedId.startsWith("\"") && cleanedId.endsWith("\"")) {
-            cleanedId = cleanedId.substring(1, cleanedId.length() - 1);
-        }
-        
-        // Remove escaped quotes if present
-        cleanedId = cleanedId.replace("\\\"", "");
-        
-        return cleanedId.trim();
-    }
-
-    /**
-     * Check payment status for debugging
-     */
-    @Transactional(readOnly = true)
-    public String checkPaymentStatus(String paymentIntentId) {
-        try {
-            return stripeService.getPaymentIntentStatus(paymentIntentId);
-        } catch (Exception e) {
-            log.error("Failed to check payment status for PI {}: {}", paymentIntentId, e.getMessage());
-            throw new BusinessLogicException("Failed to check payment status: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Simulate payment completion for testing purposes
-     * WARNING: This bypasses actual Stripe verification - for development/testing only
-     */
     @Transactional
-    public OrderDetailResponse simulatePaymentCompletion(Long orderId, Long buyerId, String stripePaymentIntentId) {
-        log.warn("SIMULATING payment completion for order {} - THIS SHOULD NOT BE USED IN PRODUCTION", orderId);
-        
-        Order order = getOrderWithValidation(orderId, buyerId, true);
+    public OrderDetailResponse requestItemPickup(Long orderId, Long itemId, Long userId) {
+        Order order = getOrderWithValidation(orderId, userId, false);
+        OrderItem orderItem = findOrderItem(order, itemId);
 
-        if (!OrderStatus.PENDING.equals(order.getStatus())) {
-            throw new BusinessLogicException("Order is not in pending status");
+        // Validate that the user making the request is the seller of the specified OrderItem
+        if (!orderItem.getSeller().getUserId().equals(userId)) {
+            throw new UnauthorizedException("Only the seller can request pickup for this item");
         }
 
-        // Simulate payment completion without Stripe verification
-        order.setStripePaymentIntentId(stripePaymentIntentId);
-        order.setStatus(OrderStatus.PAID);
-        order.setPaidAt(LocalDateTime.now());
-        
-        order.getOrderItems().forEach(item -> {
-            if (item.getStatus() == OrderItemStatus.PENDING) {
-                item.setStatus(OrderItemStatus.PROCESSING);
-                item.setEscrowStatus(EscrowStatus.HOLDING);
-                
-                Product product = item.getProduct();
-                product.setStatus(ProductStatus.SOLD);
-                product.setSoldAt(LocalDateTime.now());
-                productRepository.save(product);
-            }
-        });
-
-        // Update transaction escrow status
-        for (OrderItem item : order.getOrderItems()) {
-            Transaction transaction = getTransactionForOrderItem(item.getOrderItemId());
-            if (transaction != null && transaction.getEscrowStatus() == EscrowStatus.CANCELLED) {
-                transaction.setEscrowStatus(EscrowStatus.HOLDING);
-                transactionRepository.save(transaction);
-            }
+        // Validate that the OrderItem's current status is PROCESSING
+        if (orderItem.getStatus() != OrderItemStatus.PROCESSING) {
+            throw new BusinessLogicException("Item must be in PROCESSING status to request pickup. Current status: " + orderItem.getStatus());
         }
 
+        // Change the OrderItemStatus to AWAITING_PICKUP
+        orderItem.setStatus(OrderItemStatus.AWAITING_PICKUP);
+        
+        updateOverallOrderStatus(order);
         order = orderRepository.save(order);
+
         return convertToDetailResponse(order);
-    }
-
-    /**
-     * Adjust Pageable for seller orders to avoid sorting by non-existent OrderItem fields
-     * Since seller orders query OrderItem but we want to sort by Order fields, we need to remove
-     * any sort fields that don't exist on OrderItem
-     */
-    private Pageable adjustPageableForSellerOrders(Pageable pageable) {
-        if (pageable.getSort().isUnsorted()) {
-            return pageable;
-        }
-        
-        // For seller orders, we only want to sort by the @Query ORDER BY clause
-        // Remove any additional sorting from Pageable to avoid conflicts
-        return PageRequest.of(
-            pageable.getPageNumber(), 
-            pageable.getPageSize()
-            // No additional sorting - rely on @Query ORDER BY clause
-        );
-    }
-
-    private String calculateOverallEscrowStatus(Order order) {
-        if (order.getOrderItems().isEmpty()) {
-            return EscrowStatus.CANCELLED.name();
-        }
-        
-        // Get all unique escrow statuses from order items
-        Set<EscrowStatus> escrowStatuses = order.getOrderItems().stream()
-            .map(OrderItem::getEscrowStatus)
-            .collect(Collectors.toSet());
-        
-        // If all items have the same escrow status, return that status
-        if (escrowStatuses.size() == 1) {
-            return escrowStatuses.iterator().next().name();
-        }
-        
-        // Multiple different statuses - determine the overall status based on priority
-        if (escrowStatuses.contains(EscrowStatus.HOLDING)) {
-            return EscrowStatus.HOLDING.name(); // If any item is holding money, overall is holding
-        } else if (escrowStatuses.contains(EscrowStatus.RELEASED)) {
-            return EscrowStatus.RELEASED.name(); // If any item is released, overall is released
-        } else if (escrowStatuses.contains(EscrowStatus.TRANSFERRED)) {
-            return EscrowStatus.TRANSFERRED.name(); // If any item is transferred, overall is transferred
-        } else if (escrowStatuses.contains(EscrowStatus.REFUNDED)) {
-            return EscrowStatus.REFUNDED.name(); // If any item is refunded, overall is refunded
-        } else {
-            return EscrowStatus.CANCELLED.name(); // Default to cancelled
-        }
-    }
-    
-    /**
-     * Load product images separately to avoid MultipleBagFetchException
-     * This method takes orders that have already been loaded and loads the images for all products
-     */
-    private void loadProductImagesForOrders(List<Order> orders) {
-        if (orders.isEmpty()) {
-            return;
-        }
-        
-        // Collect all unique product IDs from the orders
-        Set<Long> productIds = orders.stream()
-            .flatMap(order -> order.getOrderItems().stream())
-            .map(orderItem -> orderItem.getProduct().getProductId())
-            .collect(Collectors.toSet());
-        
-        if (productIds.isEmpty()) {
-            return;
-        }
-        
-        // Load all products with their images in a single query
-        List<Product> productsWithImages = productRepository.findByProductIdInWithImages(new ArrayList<>(productIds));
-        
-        // Create a map for quick lookup
-        Map<Long, Product> productImageMap = productsWithImages.stream()
-            .collect(Collectors.toMap(Product::getProductId, Function.identity()));
-        
-        // Update the products in the orders with the image data
-        orders.forEach(order -> 
-            order.getOrderItems().forEach(orderItem -> {
-                Product productWithImages = productImageMap.get(orderItem.getProduct().getProductId());
-                if (productWithImages != null) {
-                    // Copy the images from the fetched product to the existing product
-                    orderItem.getProduct().setImages(productWithImages.getImages());
-                }
-            })
-        );
-    }
-
-    /**
-     * Get detailed transaction analytics for admin dashboard
-     */
-    @Transactional(readOnly = true)
-    public Object getTransactionAnalytics(LocalDateTime startDate, LocalDateTime endDate) {
-        LocalDateTime defaultStart = startDate != null ? startDate : LocalDateTime.now().minusMonths(3);
-        LocalDateTime defaultEnd = endDate != null ? endDate : LocalDateTime.now();
-        
-        // Get all transactions within date range
-        List<Transaction> transactions = transactionRepository.findByCreatedAtBetween(defaultStart, defaultEnd);
-        
-        // Calculate analytics
-        long totalTransactions = transactions.size();
-        BigDecimal totalVolume = transactions.stream()
-                .map(Transaction::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
-        // Group by escrow status
-        Map<EscrowStatus, Long> escrowStatusCounts = transactions.stream()
-                .collect(Collectors.groupingBy(
-                    Transaction::getEscrowStatus,
-                    Collectors.counting()
-                ));
-        
-        // Group by transaction status
-        Map<TransactionStatus, Long> transactionStatusCounts = transactions.stream()
-                .collect(Collectors.groupingBy(
-                    Transaction::getStatus,
-                    Collectors.counting()
-                ));
-        
-        // Calculate dispute rate
-        long disputedTransactions = transactions.stream()
-                .mapToLong(t -> t.getDisputeStatus() == DisputeStatus.OPEN ? 1 : 0)
-                .sum();
-        
-        double disputeRate = totalTransactions > 0 ? (double) disputedTransactions / totalTransactions * 100 : 0;
-        
-        return Map.of(
-            "totalTransactions", totalTransactions,
-            "totalVolume", totalVolume,
-            "avgTransactionValue", totalTransactions > 0 ? 
-                totalVolume.divide(BigDecimal.valueOf(totalTransactions), 2, RoundingMode.HALF_UP) : 
-                BigDecimal.ZERO,
-            "escrowStatusBreakdown", escrowStatusCounts,
-            "transactionStatusBreakdown", transactionStatusCounts,
-            "disputeRate", disputeRate,
-            "dateRange", Map.of("start", defaultStart, "end", defaultEnd)
-        );
-    }
-
-    /**
-     * Get all transactions for admin with comprehensive filtering
-     */    @Transactional(readOnly = true)
-    public PagedResponse<Object> getAllTransactionsForAdmin(
-            String status, String escrowStatus, Long buyerId, Long sellerId,
-            LocalDateTime startDate, LocalDateTime endDate, String search, Pageable pageable) {
-        
-        // Step 1: Get transactions with regular joins (not JOIN FETCH) for filtering and pagination
-        Page<Transaction> transactions = transactionRepository.findAll((root, query, criteriaBuilder) -> {
-            List<Predicate> predicates = new ArrayList<>();
-            
-            // Filter by transaction status
-            if (status != null && !status.trim().isEmpty()) {
-                try {
-                    TransactionStatus transactionStatus = TransactionStatus.valueOf(status.toUpperCase());
-                    predicates.add(criteriaBuilder.equal(root.get("status"), transactionStatus));
-                } catch (IllegalArgumentException e) {
-                    predicates.add(criteriaBuilder.disjunction()); // Return empty result for invalid status
-                }
-            }
-            
-            // Filter by escrow status
-            if (escrowStatus != null && !escrowStatus.trim().isEmpty()) {
-                try {
-                    EscrowStatus escrowStat = EscrowStatus.valueOf(escrowStatus.toUpperCase());
-                    predicates.add(criteriaBuilder.equal(root.get("escrowStatus"), escrowStat));
-                } catch (IllegalArgumentException e) {
-                    predicates.add(criteriaBuilder.disjunction());
-                }
-            }
-            
-            // Filter by buyer ID
-            if (buyerId != null) {
-                Join<Transaction, User> buyerJoin = root.join("buyer", JoinType.LEFT);
-                predicates.add(criteriaBuilder.equal(buyerJoin.get("userId"), buyerId));
-            }
-            
-            // Filter by seller ID
-            if (sellerId != null) {
-                Join<Transaction, User> sellerJoin = root.join("seller", JoinType.LEFT);
-                predicates.add(criteriaBuilder.equal(sellerJoin.get("userId"), sellerId));
-            }
-            
-            // Filter by date range
-            if (startDate != null) {
-                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), startDate));
-            }
-            if (endDate != null) {
-                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("createdAt"), endDate));
-            }
-            
-            // Search functionality
-            if (search != null && !search.trim().isEmpty()) {
-                String searchPattern = "%" + search.toLowerCase() + "%";
-                Join<Transaction, User> buyerJoinForSearch = root.join("buyer", JoinType.LEFT);
-                Join<Transaction, User> sellerJoinForSearch = root.join("seller", JoinType.LEFT);
-                
-                Predicate searchPredicate = criteriaBuilder.or(
-                    criteriaBuilder.like(
-                        criteriaBuilder.lower(buyerJoinForSearch.get("username")), 
-                        searchPattern
-                    ),
-                    criteriaBuilder.like(
-                        criteriaBuilder.lower(sellerJoinForSearch.get("username")), 
-                        searchPattern
-                    ),
-                    criteriaBuilder.like(
-                        criteriaBuilder.toString(root.get("transactionId")), 
-                        searchPattern
-                    )
-                );
-                predicates.add(searchPredicate);
-            }
-            
-            return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
-        }, pageable);
-        
-        // Step 2: If we have transactions, load the relationships separately to avoid N+1 queries
-        if (transactions.hasContent()) {
-            List<Long> transactionIds = transactions.getContent().stream()
-                .map(Transaction::getTransactionId)
-                .collect(Collectors.toList());
-            
-            // Fetch transactions with all relationships using batch loading
-            List<Transaction> fullTransactions = transactionRepository.findByTransactionIdInWithAllRelationships(transactionIds);
-            
-            // Create a map for quick lookup
-            Map<Long, Transaction> transactionMap = fullTransactions.stream()
-                .collect(Collectors.toMap(Transaction::getTransactionId, Function.identity()));
-            
-            // Maintain the original order from pagination
-            List<Object> transactionResponses = transactions.getContent().stream()
-                .map(t -> transactionMap.get(t.getTransactionId()))
-                .filter(Objects::nonNull)
-                .map(this::convertToTransactionAdminResponse)
-                .collect(Collectors.toList());
-            
-            // Create a new Page with the converted responses
-            Page<Object> responsePage = new PageImpl<>(
-                transactionResponses, 
-                pageable, 
-                transactions.getTotalElements()
-            );
-            
-            return PagedResponse.of(responsePage);
-        } else {
-            // No transactions found, return empty page
-            Page<Object> emptyPage = new PageImpl<>(new ArrayList<>(), pageable, 0);
-            return PagedResponse.of(emptyPage);
-        }
-    }
-
-    /**
-     * Get problem transactions that need admin attention
-     */
-    @Transactional(readOnly = true)
-    public Object getProblemTransactions() {
-        // Find transactions with issues
-        List<Transaction> disputedTransactions = transactionRepository.findByDisputeStatus(DisputeStatus.OPEN);
-        List<Transaction> failedTransfers = transactionRepository.findByEscrowStatus(EscrowStatus.TRANSFER_FAILED);
-        List<Transaction> stuckEscrows = transactionRepository.findByEscrowStatusAndCreatedAtBefore(
-            EscrowStatus.HOLDING, LocalDateTime.now().minusDays(30)
-        );
-        
-        return Map.of(
-            "disputedTransactions", disputedTransactions.stream()
-                .map(this::convertToTransactionAdminResponse)
-                .collect(Collectors.toList()),
-            "failedTransfers", failedTransfers.stream()
-                .map(this::convertToTransactionAdminResponse)
-                .collect(Collectors.toList()),
-            "stuckEscrows", stuckEscrows.stream()
-                .map(this::convertToTransactionAdminResponse)
-                .collect(Collectors.toList()),
-            "summary", Map.of(
-                "disputedCount", disputedTransactions.size(),
-                "failedTransferCount", failedTransfers.size(),
-                "stuckEscrowCount", stuckEscrows.size(),
-                "totalProblems", disputedTransactions.size() + failedTransfers.size() + stuckEscrows.size()
-            )
-        );
-    }
-
-    /**
-     * Force release escrow for a specific transaction
-     */
-    @Transactional
-    public void forceReleaseEscrow(Long transactionId, String notes, Long adminId) {
-        Transaction transaction = transactionRepository.findById(transactionId)
-                .orElseThrow(() -> new ResourceNotFoundException("Transaction not found with ID: " + transactionId));
-        
-        if (transaction.getEscrowStatus() != EscrowStatus.HOLDING) {
-            throw new BusinessLogicException("Cannot release escrow - transaction is not in HOLDING status");
-        }
-        
-        try {
-            // Release payment to seller through Stripe
-            stripeService.releasePaymentToSeller(transaction.getOrderItem(), transaction);
-            
-            // Update transaction status
-            transaction.setEscrowStatus(EscrowStatus.TRANSFERRED);
-            transactionRepository.save(transaction);
-            
-            log.info("Admin {} force released escrow for transaction {}. Notes: {}", 
-                    adminId, transactionId, notes);
-                    
-        } catch (Exception e) {
-            log.error("Failed to force release escrow for transaction {}: {}", transactionId, e.getMessage());
-            throw new BusinessLogicException("Failed to release escrow: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Get revenue analytics for admin dashboard
-     */
-    @Transactional(readOnly = true)
-    public Object getRevenueAnalytics(String period, int periods) {
-        LocalDateTime endDate = LocalDateTime.now();
-        LocalDateTime startDate;
-        
-        // Calculate start date based on period
-        switch (period.toLowerCase()) {
-            case "daily" -> startDate = endDate.minusDays(periods);
-            case "weekly" -> startDate = endDate.minusWeeks(periods);
-            case "monthly" -> startDate = endDate.minusMonths(periods);
-            default -> throw new BusinessLogicException("Invalid period: " + period);
-        }
-        
-        // Get completed transactions within date range
-        List<Transaction> completedTransactions = transactionRepository
-                .findByStatusAndCreatedAtBetween(TransactionStatus.DELIVERED, startDate, endDate);
-        
-        // Calculate total revenue and platform fees
-        BigDecimal totalRevenue = completedTransactions.stream()
-                .map(Transaction::getAmount)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
-        BigDecimal totalPlatformFees = completedTransactions.stream()
-                .map(Transaction::getPlatformFee)
-                .reduce(BigDecimal.ZERO, BigDecimal::add);
-        
-        // Group by time period for trend analysis
-        Map<String, BigDecimal> revenueByPeriod = new LinkedHashMap<>();
-        Map<String, BigDecimal> feesByPeriod = new LinkedHashMap<>();
-        
-        // This would need more complex grouping logic based on the period type
-        // For now, return aggregated data
-        
-        return Map.of(
-            "totalRevenue", totalRevenue,
-            "totalPlatformFees", totalPlatformFees,
-            "netRevenue", totalRevenue.subtract(totalPlatformFees),
-            "transactionCount", completedTransactions.size(),
-            "avgOrderValue", completedTransactions.size() > 0 ? 
-                totalRevenue.divide(BigDecimal.valueOf(completedTransactions.size()), 2, RoundingMode.HALF_UP) : 
-                BigDecimal.ZERO,
-            "period", period,
-            "periods", periods,
-            "dateRange", Map.of("start", startDate, "end", endDate),
-            "revenueByPeriod", revenueByPeriod,
-            "feesByPeriod", feesByPeriod
-        );
-    }    /**
-     * Get seller performance metrics
-     */
-    @Transactional(readOnly = true)
-    public PagedResponse<Object> getSellerPerformanceMetrics(String sortBy, int days, Pageable pageable) {
-        LocalDateTime startDate = LocalDateTime.now().minusDays(days);
-        
-        // Get users who have transactions as sellers in the specified period
-        List<Transaction> recentTransactions = transactionRepository.findByCreatedAtBetween(startDate, LocalDateTime.now());
-        Set<Long> sellerIds = recentTransactions.stream()
-                .map(t -> t.getSeller().getUserId())
-                .collect(Collectors.toSet());
-        
-        if (sellerIds.isEmpty()) {
-            // No sellers in the period, return empty result
-            return PagedResponse.of(Page.empty(pageable));
-        }
-        
-        // Get the sellers and calculate metrics
-        List<User> allSellers = userRepository.findAllById(sellerIds);
-        
-        List<Object> sellerMetrics = allSellers.stream().map(seller -> {
-            List<Transaction> sellerTransactions = transactionRepository
-                    .findBySellerAndCreatedAtAfter(seller, startDate);
-            
-            long totalSales = sellerTransactions.size();
-            BigDecimal totalVolume = sellerTransactions.stream()
-                    .map(Transaction::getAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            
-            long successfulSales = sellerTransactions.stream()
-                    .mapToLong(t -> t.getStatus() == TransactionStatus.DELIVERED ? 1 : 0)
-                    .sum();
-            
-            double successRate = totalSales > 0 ? (double) successfulSales / totalSales * 100 : 0;
-            
-            long disputes = sellerTransactions.stream()
-                    .mapToLong(t -> t.getDisputeStatus() != null && t.getDisputeStatus() == DisputeStatus.OPEN ? 1 : 0)
-                    .sum();
-            
-            double disputeRate = totalSales > 0 ? (double) disputes / totalSales * 100 : 0;
-            
-            return Map.of(
-                "sellerId", seller.getUserId(),
-                "username", seller.getUsername(),
-                "totalSales", totalSales,
-                "totalVolume", totalVolume,
-                "successRate", successRate,
-                "disputeRate", disputeRate,
-                "avgOrderValue", totalSales > 0 ? 
-                    totalVolume.divide(BigDecimal.valueOf(totalSales), 2, RoundingMode.HALF_UP) : 
-                    BigDecimal.ZERO
-            );
-        }).collect(Collectors.toList());
-        
-        // Sort based on sortBy parameter
-        switch (sortBy.toLowerCase()) {
-            case "total_volume":
-                sellerMetrics.sort((a, b) -> ((BigDecimal) ((Map<?, ?>) b).get("totalVolume"))
-                        .compareTo((BigDecimal) ((Map<?, ?>) a).get("totalVolume")));
-                break;
-            case "success_rate":
-                sellerMetrics.sort((a, b) -> Double.compare(
-                        (Double) ((Map<?, ?>) b).get("successRate"),
-                        (Double) ((Map<?, ?>) a).get("successRate")));
-                break;
-            case "dispute_rate":
-                sellerMetrics.sort((a, b) -> Double.compare(
-                        (Double) ((Map<?, ?>) a).get("disputeRate"),
-                        (Double) ((Map<?, ?>) b).get("disputeRate")));
-                break;
-            default: // sales_volume
-                sellerMetrics.sort((a, b) -> Long.compare(
-                        (Long) ((Map<?, ?>) b).get("totalSales"),
-                        (Long) ((Map<?, ?>) a).get("totalSales")));
-        }
-        
-        // Manual pagination
-        int start = pageable.getPageNumber() * pageable.getPageSize();
-        int end = Math.min(start + pageable.getPageSize(), sellerMetrics.size());
-        List<Object> pageContent = start < sellerMetrics.size() ? 
-                sellerMetrics.subList(start, end) : new ArrayList<>();
-        
-        Page<Object> page = new PageImpl<>(pageContent, pageable, sellerMetrics.size());
-        return PagedResponse.of(page);
-    }
-
-    /**
-     * Get buyer behavior analytics
-     */
-    @Transactional(readOnly = true)
-    public PagedResponse<Object> getBuyerBehaviorAnalytics(String sortBy, int days, Pageable pageable) {
-        LocalDateTime startDate = LocalDateTime.now().minusDays(days);
-        
-        Page<User> buyers = userRepository.findAll(pageable);
-        
-        Page<Object> buyerMetrics = buyers.map(buyer -> {
-            List<Order> buyerOrders = orderRepository.findByBuyerAndCreatedAtAfter(buyer, startDate);
-            
-            BigDecimal totalSpent = buyerOrders.stream()
-                    .filter(order -> order.getStatus() == OrderStatus.DELIVERED || order.getStatus() == OrderStatus.PAID)
-                    .map(Order::getTotalAmount)
-                    .reduce(BigDecimal.ZERO, BigDecimal::add);
-            
-            long orderCount = buyerOrders.size();
-            long cancelledOrders = buyerOrders.stream()
-                    .mapToLong(o -> o.getStatus() == OrderStatus.CANCELLED ? 1 : 0)
-                    .sum();
-            
-            double cancellationRate = orderCount > 0 ? (double) cancelledOrders / orderCount * 100 : 0;
-            
-            return Map.of(
-                "buyerId", buyer.getUserId(),
-                "username", buyer.getUsername(),
-                "totalSpent", totalSpent,
-                "orderCount", orderCount,
-                "avgOrderValue", orderCount > 0 ? 
-                    totalSpent.divide(BigDecimal.valueOf(orderCount), 2, RoundingMode.HALF_UP) : 
-                    BigDecimal.ZERO,
-                "cancellationRate", cancellationRate
-            );
-        });
-        
-        return PagedResponse.of(buyerMetrics);
-    }
-
-    /**
-     * Export order data in specified format
-     */
-    @Transactional(readOnly = true)
-    public byte[] exportOrderData(String status, LocalDateTime startDate, LocalDateTime endDate, String format) {
-        // Get orders with filters
-        List<Order> orders = orderRepository.findAll((root, query, criteriaBuilder) -> {
-            List<Predicate> predicates = new ArrayList<>();
-            
-            if (status != null && !status.trim().isEmpty()) {
-                try {
-                    OrderStatus orderStatus = OrderStatus.valueOf(status.toUpperCase());
-                    predicates.add(criteriaBuilder.equal(root.get("status"), orderStatus));
-                } catch (IllegalArgumentException e) {
-                    predicates.add(criteriaBuilder.disjunction());
-                }
-            }
-            
-            if (startDate != null) {
-                predicates.add(criteriaBuilder.greaterThanOrEqualTo(root.get("createdAt"), startDate));
-            }
-            if (endDate != null) {
-                predicates.add(criteriaBuilder.lessThanOrEqualTo(root.get("createdAt"), endDate));
-            }
-            
-            return criteriaBuilder.and(predicates.toArray(new Predicate[0]));
-        });
-        
-        if ("csv".equals(format)) {
-            return exportOrdersAsCsv(orders);
-        } else if ("excel".equals(format)) {
-            return exportOrdersAsExcel(orders);
-        } else {
-            throw new BusinessLogicException("Unsupported export format: " + format);
-        }
-    }
-
-    /**
-     * Bulk update order statuses
-     */
-    @Transactional
-    public Object bulkUpdateOrderStatuses(Map<String, Object> request, Long adminId) {
-        @SuppressWarnings("unchecked")
-        List<Long> orderIds = (List<Long>) request.get("orderIds");
-        String newStatus = (String) request.get("status");
-        String notes = (String) request.get("notes");
-        
-        if (orderIds == null || orderIds.isEmpty()) {
-            throw new BusinessLogicException("Order IDs are required for bulk update");
-        }
-        
-        if (newStatus == null || newStatus.trim().isEmpty()) {
-            throw new BusinessLogicException("Status is required for bulk update");
-        }
-        
-        OrderStatus orderStatus;
-        try {
-            orderStatus = OrderStatus.valueOf(newStatus.toUpperCase());
-        } catch (IllegalArgumentException e) {
-            throw new BusinessLogicException("Invalid order status: " + newStatus);
-        }
-        
-        int successCount = 0;
-        int failCount = 0;
-        List<String> errors = new ArrayList<>();
-        
-        for (Long orderId : orderIds) {
-            try {
-                forceUpdateOrderStatus(orderId, newStatus, notes, adminId);
-                successCount++;
-            } catch (Exception e) {
-                failCount++;
-                errors.add("Order " + orderId + ": " + e.getMessage());
-            }
-        }
-        
-        return Map.of(
-            "processed", orderIds.size(),
-            "successful", successCount,
-            "failed", failCount,
-            "errors", errors
-        );
-    }
-
-    /**
-     * Get order timeline for debugging
-     */
-    @Transactional(readOnly = true)
-    public Object getOrderTimeline(Long orderId) {
-        Order order = orderRepository.findById(orderId)
-                .orElseThrow(() -> new ResourceNotFoundException("Order not found with ID: " + orderId));
-        
-        List<Map<String, Object>> timeline = new ArrayList<>();
-        
-        // Order creation
-        timeline.add(Map.of(
-           
-            "timestamp", order.getCreatedAt(),
-            "event", "ORDER_CREATED",
-            "description", "Order created",
-            "status", "PENDING"
-        ));
-        
-        // Payment events
-        if (order.getPaidAt() != null) {
-            timeline.add(Map.of(
-                "timestamp", order.getPaidAt(),
-                "event", "PAYMENT_CONFIRMED",
-                "description", "Payment confirmed",
-                "status", "PAID"
-            ));
-        }
-        
-        // Shipping events
-        if (order.getShippedAt() != null) {
-            timeline.add(Map.of(
-                "timestamp", order.getShippedAt(),
-                "event", "ORDER_SHIPPED",
-                "description", "Order shipped",
-                "status", "SHIPPED"
-            ));
-        }
-        
-        // Delivery events
-        if (order.getDeliveredAt() != null) {
-            timeline.add(Map.of(
-                "timestamp", order.getDeliveredAt(),
-                "event", "ORDER_DELIVERED",
-                "description", "Order delivered",
-                "status", "DELIVERED"
-            ));
-        }
-        
-        // Add transaction events
-        for (OrderItem item : order.getOrderItems()) {
-            Optional<Transaction> transactionOpt = getTransactionForOrderItemSafely(item.getOrderItemId());
-            if (transactionOpt.isPresent()) {
-                Transaction transaction = transactionOpt.get();
-                
-                if (transaction.getShippedAt() != null) {
-                    timeline.add(Map.of(
-                        "timestamp", transaction.getShippedAt(),
-                        "event", "ITEM_SHIPPED",
-                        "description", "Item shipped: " + item.getProduct().getTitle(),
-                        "trackingNumber", transaction.getTrackingNumber() != null ? transaction.getTrackingNumber() : "",
-                        "itemId", item.getOrderItemId()
-                    ));
-                }
-                
-                if (transaction.getDeliveredAt() != null) {
-                    timeline.add(Map.of(
-                        "timestamp", transaction.getDeliveredAt(),
-                        "event", "ITEM_DELIVERED",
-                        "description", "Item delivered: " + item.getProduct().getTitle(),
-                        "itemId", item.getOrderItemId()
-                    ));
-                }
-            }
-        }
-        
-        // Sort timeline by timestamp
-        timeline.sort((a, b) -> ((LocalDateTime) a.get("timestamp")).compareTo((LocalDateTime) b.get("timestamp")));
-        
-        return Map.of(
-            "orderId", orderId,
-            "currentStatus", order.getStatus().name(),
-            "timeline", timeline,
-            "summary", Map.of(
-                "totalEvents", timeline.size(),
-                "orderAge", java.time.Duration.between(order.getCreatedAt(), LocalDateTime.now()).toDays() + " days"
-            )
-        );
-    }
-
-    // Helper methods for export functionality
-    private byte[] exportOrdersAsCsv(List<Order> orders) {
-        StringBuilder csv = new StringBuilder();
-        csv.append("Order ID,Status,Total Amount,Buyer,Created At,Paid At,Delivered At\n");
-        
-        for (Order order : orders) {
-            csv.append(order.getOrderId()).append(",")
-               .append(order.getStatus()).append(",")
-               .append(order.getTotalAmount()).append(",")
-               .append(order.getBuyer().getUsername()).append(",")
-               .append(order.getCreatedAt()).append(",")
-               .append(order.getPaidAt() != null ? order.getPaidAt() : "").append(",")
-               .append(order.getDeliveredAt() != null ? order.getDeliveredAt() : "").append("\n");
-        }
-        
-        return csv.toString().getBytes();    }
-    
-    private byte[] exportOrdersAsExcel(List<Order> orders) {
-        // For now, return CSV format - Excel export would require Apache POI library
-        return exportOrdersAsCsv(orders);
-    }
-    
-    /**
-     * Sort transactions according to the provided Sort specification
-     */
-    private List<Transaction> sortTransactions(List<Transaction> transactions, Sort sort) {
-        if (sort == null || sort.isUnsorted()) {
-            return transactions;
-        }
-        
-        Comparator<Transaction> comparator = null;
-        
-        for (Sort.Order order : sort) {
-            Comparator<Transaction> fieldComparator = null;
-            
-            switch (order.getProperty()) {
-                case "transactionId":
-                    fieldComparator = Comparator.comparing(Transaction::getTransactionId);
-                    break;
-                case "amount":
-                    fieldComparator = Comparator.comparing(Transaction::getAmount);
-                    break;
-                case "createdAt":
-                    fieldComparator = Comparator.comparing(Transaction::getCreatedAt);
-                    break;
-                case "status":
-                    fieldComparator = Comparator.comparing(t -> t.getStatus().name());
-                    break;
-                case "escrowStatus":
-                    fieldComparator = Comparator.comparing(t -> t.getEscrowStatus().name());
-                    break;
-                case "buyer.username":
-                    fieldComparator = Comparator.comparing(t -> t.getBuyer().getUsername());
-                    break;
-                case "seller.username":
-                    fieldComparator = Comparator.comparing(t -> t.getSeller().getUsername());
-                    break;
-                default:
-                    // Default to createdAt if unknown property
-                    fieldComparator = Comparator.comparing(Transaction::getCreatedAt);
-                    break;
-            }
-            
-            if (order.isDescending()) {
-                fieldComparator = fieldComparator.reversed();
-            }
-            
-            if (comparator == null) {
-                comparator = fieldComparator;
-            } else {
-                comparator = comparator.thenComparing(fieldComparator);
-            }
-        }
-        
-        return transactions.stream()
-                .sorted(comparator)
-                .collect(Collectors.toList());
-    }
-    
-    /**
-     * Convert transaction to admin response format
-     */
-    private Object convertToTransactionAdminResponse(Transaction transaction) {
-        Map<String, Object> response = new HashMap<>();
-        response.put("transactionId", transaction.getTransactionId());
-        response.put("amount", transaction.getAmount());
-        response.put("platformFee", transaction.getPlatformFee());
-        response.put("status", transaction.getStatus().name());
-        response.put("escrowStatus", transaction.getEscrowStatus().name());
-        response.put("disputeStatus", transaction.getDisputeStatus() != null ? transaction.getDisputeStatus().name() : "NONE");
-        response.put("buyer", Map.of(
-            "userId", transaction.getBuyer().getUserId(),
-            "username", transaction.getBuyer().getUsername()
-        ));
-        response.put("seller", Map.of(
-            "userId", transaction.getSeller().getUserId(),
-            "username", transaction.getSeller().getUsername()
-        ));
-        response.put("orderId", transaction.getOrderItem().getOrder().getOrderId());
-        response.put("productTitle", transaction.getOrderItem().getProduct().getTitle());
-        response.put("createdAt", transaction.getCreatedAt());
-        response.put("shippedAt", transaction.getShippedAt());
-        response.put("deliveredAt", transaction.getDeliveredAt());
-        response.put("trackingNumber", transaction.getTrackingNumber());
-        return response;
     }
 }

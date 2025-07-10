@@ -10,8 +10,10 @@ import org.springframework.data.repository.query.Param;
 import se.vestige_be.pojo.Product;
 import se.vestige_be.pojo.enums.ProductStatus;
 
+import java.time.LocalDateTime;
 import java.util.List;
 import java.util.Optional;
+import java.time.LocalDateTime;
 
 public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpecificationExecutor<Product> {
     Page<Product> findByStatus(ProductStatus status, Pageable pageable);
@@ -48,4 +50,8 @@ public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpeci
     @Query("SELECT CASE WHEN COUNT(DISTINCT p.seller.userId) > 1 THEN true ELSE false END " +
            "FROM Product p WHERE p.slug LIKE CONCAT(:baseSlug, '%')")
     boolean hasMultipleSellersForSlug(@Param("baseSlug") String baseSlug);
+    
+    // Add method for finding last product listing date for a user
+    @Query("SELECT MAX(p.createdAt) FROM Product p WHERE p.seller.userId = :sellerId")
+    LocalDateTime findLastListingDateBySellerUserId(@Param("sellerId") Long sellerId);
 }

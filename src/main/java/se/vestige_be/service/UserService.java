@@ -11,24 +11,33 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.request.AdminCreateUserRequest;
+import se.vestige_be.dto.request.AdminUpdateUserRequest;
 import se.vestige_be.dto.request.RegisterRequest;
 import se.vestige_be.dto.request.UpdateProfileRequest;
 import se.vestige_be.dto.response.PagedResponse;
 import se.vestige_be.dto.response.UserListResponse;
 import se.vestige_be.dto.response.UserProfileResponse;
+import se.vestige_be.dto.response.UserStatisticsResponse;
 import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.pojo.Role;
 import se.vestige_be.pojo.User;
+import se.vestige_be.pojo.Order;
+import se.vestige_be.pojo.enums.OrderStatus;
 import se.vestige_be.pojo.enums.ProductStatus;
 import se.vestige_be.repository.ProductRepository;
 import se.vestige_be.repository.RoleRepository;
+import se.vestige_be.repository.OrderRepository;
 import se.vestige_be.repository.UserRepository;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
+import java.util.Map;
+import java.util.stream.Collectors;
+import java.util.Map;
+import java.util.stream.Collectors;
 
 @Service
 @AllArgsConstructor
@@ -38,6 +47,7 @@ public class UserService {
     private final UserRepository userRepository;
     private final RoleRepository roleRepository;
     private final ProductRepository productRepository;
+    private final OrderRepository orderRepository;
     private final PasswordEncoder passwordEncoder;
 
     public List<User> findAllUsers() {
@@ -333,5 +343,225 @@ public class UserService {
                 .activeProductsCount(activeProductsCount.intValue())
                 .soldProductsCount(soldProductsCount.intValue())
                 .build();
+    }
+
+    // Admin-specific methods
+    @Transactional
+    public UserProfileResponse adminUpdateUser(Long userId, AdminUpdateUserRequest request) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+
+        // Update fields only if they are provided (non-null)
+        if (request.getUsername() != null) {
+            if (!request.getUsername().equals(user.getUsername()) && existsByUsername(request.getUsername())) {
+                throw new BusinessLogicException("Username already exists");
+            }
+            user.setUsername(request.getUsername());
+        }
+
+        if (request.getEmail() != null) {
+            if (!request.getEmail().equals(user.getEmail()) && existsByEmail(request.getEmail())) {
+                throw new BusinessLogicException("Email already exists");
+            }
+            user.setEmail(request.getEmail());
+        }
+
+        if (request.getPassword() != null) {
+            user.setPassword(passwordEncoder.encode(request.getPassword()));
+        }
+
+        if (request.getFirstName() != null) {
+            user.setFirstName(request.getFirstName());
+        }
+
+        if (request.getLastName() != null) {
+            user.setLastName(request.getLastName());
+        }
+
+        if (request.getPhoneNumber() != null) {
+            user.setPhoneNumber(request.getPhoneNumber());
+        }
+
+        if (request.getDateOfBirth() != null) {
+            user.setDateOfBirth(request.getDateOfBirth());
+        }
+
+        if (request.getGender() != null) {
+            user.setGender(request.getGender());
+        }
+
+        if (request.getRoleName() != null) {
+            Role role = roleRepository.findByName(request.getRoleName())
+                    .orElseThrow(() -> new BusinessLogicException("Role not found: " + request.getRoleName()));
+            user.setRole(role);
+        }
+
+        if (request.getIsVerified() != null) {
+            user.setIsVerified(request.getIsVerified());
+        }
+
+        if (request.getIsLegitProfile() != null) {
+            user.setIsLegitProfile(request.getIsLegitProfile());
+        }
+
+        if (request.getAccountStatus() != null) {
+            user.setAccountStatus(request.getAccountStatus());
+        }
+
+        if (request.getIsActive() != null) {
+            user.setIsActive(request.getIsActive());
+        }
+
+        User updatedUser = userRepository.save(user);
+        return convertToProfileResponse(updatedUser);
+    }
+
+    @Transactional
+    public void adminDeleteUser(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+        
+        // Set user as inactive instead of hard delete to preserve data integrity
+        user.setIsActive(false);
+        user.setAccountStatus("SUSPENDED");
+        userRepository.save(user);
+    }
+
+    public UserStatisticsResponse getUserStatistics(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found with id: " + userId));
+
+        // Get order statistics (you'll need to implement these in OrderService or repository)
+        Long totalOrders = getTotalOrdersForUser(userId);
+        Long completedOrders = getCompletedOrdersForUser(userId);
+        Long pendingOrders = getPendingOrdersForUser(userId);
+        Long cancelledOrders = getCancelledOrdersForUser(userId);
+        BigDecimal totalOrderValue = getTotalOrderValueForUser(userId);
+        BigDecimal averageOrderValue = totalOrders > 0 ? 
+            totalOrderValue.divide(BigDecimal.valueOf(totalOrders), 2, BigDecimal.ROUND_HALF_UP) : 
+            BigDecimal.ZERO;
+
+        // Get product statistics
+        Long totalProductsListed = productRepository.countBySellerUserId(userId);
+        Long activeProducts = productRepository.countBySellerUserIdAndStatus(userId, ProductStatus.ACTIVE);
+        Long soldProducts = productRepository.countBySellerUserIdAndStatus(userId, ProductStatus.SOLD);
+
+        return UserStatisticsResponse.builder()
+                .userId(user.getUserId())
+                .username(user.getUsername())
+                .email(user.getEmail())
+                .fullName(user.getFirstName() + " " + user.getLastName())
+                .joinedDate(user.getJoinedDate())
+                .accountStatus(user.getAccountStatus())
+                .isLegitProfile(user.getIsLegitProfile())
+                .isVerified(user.getIsVerified())
+                .totalOrders(totalOrders)
+                .completedOrders(completedOrders)
+                .pendingOrders(pendingOrders)
+                .cancelledOrders(cancelledOrders)
+                .totalOrderValue(totalOrderValue)
+                .averageOrderValue(averageOrderValue)
+                .totalProductsListed(totalProductsListed)
+                .activeProducts(activeProducts)
+                .soldProducts(soldProducts)
+                .lastLoginDate(user.getLastLoginAt())
+                .lastOrderDate(getLastOrderDateForUser(userId))
+                .lastProductListingDate(getLastProductListingDateForUser(userId))
+                .build();
+    }
+
+    public PagedResponse<UserStatisticsResponse> getAllUsersWithStatistics(Pageable pageable, String search, Boolean isLegitProfile, String accountStatus) {
+        Specification<User> spec = buildUserSpecification(search, isLegitProfile, accountStatus);
+        Page<User> users = userRepository.findAll(spec, pageable);
+        Page<UserStatisticsResponse> userStatistics = users.map(user -> getUserStatistics(user.getUserId()));
+        return PagedResponse.of(userStatistics);
+    }
+
+    // Helper methods for order statistics
+    private Long getTotalOrdersForUser(Long userId) {
+        return orderRepository.countByBuyerUserId(userId);
+    }
+
+    private Long getCompletedOrdersForUser(Long userId) {
+        return orderRepository.countByBuyerUserIdAndStatus(userId, OrderStatus.DELIVERED);
+    }
+
+    private Long getPendingOrdersForUser(Long userId) {
+        return orderRepository.countByBuyerUserIdAndStatus(userId, OrderStatus.PENDING) +
+               orderRepository.countByBuyerUserIdAndStatus(userId, OrderStatus.PROCESSING) +
+               orderRepository.countByBuyerUserIdAndStatus(userId, OrderStatus.OUT_FOR_DELIVERY);
+    }
+
+    private Long getCancelledOrdersForUser(Long userId) {
+        return orderRepository.countByBuyerUserIdAndStatus(userId, OrderStatus.CANCELLED);
+    }
+
+    private BigDecimal getTotalOrderValueForUser(Long userId) {
+        return orderRepository.sumTotalAmountByBuyerUserId(userId);
+    }
+
+    private LocalDateTime getLastOrderDateForUser(Long userId) {
+        return orderRepository.findLastOrderDateByBuyerUserId(userId);
+    }
+
+    private LocalDateTime getLastProductListingDateForUser(Long userId) {
+        return productRepository.findLastListingDateBySellerUserId(userId);
+    }
+
+    @Transactional
+    public void bulkUpdateUsers(List<Long> userIds, String accountStatus, Boolean isVerified, Boolean isLegitProfile) {
+        List<User> users = userRepository.findAllById(userIds);
+        
+        for (User user : users) {
+            boolean updated = false;
+            
+            if (accountStatus != null) {
+                user.setAccountStatus(accountStatus);
+                updated = true;
+            }
+            
+            if (isVerified != null) {
+                user.setIsVerified(isVerified);
+                updated = true;
+            }
+            
+            if (isLegitProfile != null) {
+                user.setIsLegitProfile(isLegitProfile);
+                updated = true;
+            }
+            
+            if (updated) {
+                userRepository.save(user);
+            }
+        }
+    }
+
+    public Object getUserActivitySummary(int days) {
+        LocalDateTime since = LocalDateTime.now().minusDays(days);
+        
+        // Get basic user statistics
+        long totalUsers = userRepository.count();
+        long newUsers = userRepository.countByJoinedDateAfter(since);
+        long activeUsers = userRepository.countByLastLoginAtAfter(since);
+        long verifiedUsers = userRepository.countByIsVerifiedTrue();
+        long legitimateUsers = userRepository.countByIsLegitProfileTrue();
+        
+        // Get account status breakdown
+        Map<String, Long> statusBreakdown = userRepository.findAll().stream()
+                .collect(Collectors.groupingBy(
+                    user -> user.getAccountStatus() != null ? user.getAccountStatus() : "UNKNOWN",
+                    Collectors.counting()
+                ));
+        
+        return Map.of(
+            "totalUsers", totalUsers,
+            "newUsersLast" + days + "Days", newUsers,
+            "activeUsersLast" + days + "Days", activeUsers,
+            "verifiedUsers", verifiedUsers,
+            "legitimateUsers", legitimateUsers,
+            "accountStatusBreakdown", statusBreakdown,
+            "reportGeneratedAt", LocalDateTime.now(),
+            "reportPeriodDays", days
+        );
     }
 }
