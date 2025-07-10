@@ -3,6 +3,7 @@ package se.vestige_be.pojo;
 import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
@@ -19,24 +20,15 @@ public class FeeTier {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long tierId;
 
-    @Column(nullable = false, length = 50, columnDefinition = "varchar(50)")
-    private String tierName;
+    @Column(nullable = false, unique = true, length = 50, columnDefinition = "varchar(50)")
+    private String name;
 
-    @Column(nullable = false, precision = 10, scale = 2)
-    private BigDecimal minValue;
-
-    @Column(precision = 10, scale = 2)
-    private BigDecimal maxValue;
-
-    @Column(nullable = false, precision = 5, scale = 2)
-    private BigDecimal baseFeePercentage;
-
-    @Column(precision = 5, scale = 2)
-    private BigDecimal legitProfileDiscount = BigDecimal.ZERO;
-
-    @Column(precision = 5, scale = 2)
-    private BigDecimal membershipDiscount = BigDecimal.ZERO;
+    @Column(nullable = false, precision = 5, scale = 4)
+    private BigDecimal feePercentage;
 
     @CreationTimestamp
     private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 }

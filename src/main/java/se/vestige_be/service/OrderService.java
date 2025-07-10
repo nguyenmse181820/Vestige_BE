@@ -1034,7 +1034,7 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
 
         // Calculate fees
         BigDecimal platformFee = feeTierService.calculatePlatformFee(itemPrice, product.getSeller());
-        BigDecimal feePercentage = feeTierService.calculateFeePercentage(itemPrice, product.getSeller());
+        BigDecimal feePercentage = feeTierService.getFeePercentageForSeller(product.getSeller());
 
         return OrderItemData.builder()
                 .product(product)

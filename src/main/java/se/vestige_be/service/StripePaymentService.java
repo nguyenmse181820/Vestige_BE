@@ -7,6 +7,7 @@ import com.stripe.model.checkout.Session;
 import com.stripe.param.*;
 import com.stripe.param.checkout.SessionCreateParams;
 import lombok.AllArgsConstructor;
+import lombok.Builder;
 import lombok.Data;
 import lombok.Getter;
 import lombok.extern.slf4j.Slf4j;
@@ -72,14 +73,11 @@ public class StripePaymentService {
     @Transactional
     public PaymentResponse createPayment(Long buyerId, OrderCreateRequest request) {
         try {
-            // Validate single product
             if (request.getItems().size() != 1) {
                 throw new BusinessLogicException("Only single product orders are supported");
             }
 
-            OrderCreateRequest.OrderItemRequest itemRequest = request.getItems().get(0);
-
-            // Load and validate entities
+            OrderCreateRequest.OrderItemRequest itemRequest = request.getItems().getFirst();
             User buyer = userRepository.findById(buyerId)
                     .orElseThrow(() -> new BusinessLogicException("Buyer not found"));
 
@@ -91,12 +89,10 @@ public class StripePaymentService {
 
             validatePurchase(buyer, product, shippingAddress);
 
-            // Calculate price and fees
             BigDecimal itemPrice = calculateItemPrice(itemRequest, product, buyerId);
             BigDecimal platformFee = feeTierService.calculatePlatformFee(itemPrice, product.getSeller());
-            BigDecimal feePercentage = feeTierService.calculateFeePercentage(itemPrice, product.getSeller());
+            BigDecimal feePercentage = feeTierService.getFeePercentageForSeller(product.getSeller());
 
-            // Create Order (simplified structure)
             Order order = Order.builder()
                     .buyer(buyer)
                     .totalAmount(itemPrice)
@@ -106,7 +102,6 @@ public class StripePaymentService {
                     .build();
             order = orderRepository.save(order);
 
-            // Create OrderItem
             OrderItem orderItem = OrderItem.builder()
                     .order(order)
                     .product(product)
@@ -118,7 +113,6 @@ public class StripePaymentService {
                     .escrowStatus(EscrowStatus.HOLDING)
                     .build();
 
-            // Create Transaction
             Transaction transaction = Transaction.builder()
                     .orderItem(orderItem)
                     .seller(product.getSeller())
@@ -135,10 +129,8 @@ public class StripePaymentService {
                     .build();
             transaction = transactionRepository.save(transaction);
 
-            // Create Stripe checkout session
             String checkoutUrl = createStripeCheckoutSession(order, transaction, product);
 
-            // Mark product as pending payment
             product.setStatus(ProductStatus.PENDING_PAYMENT);
             productRepository.save(product);
 
@@ -202,7 +194,6 @@ public class StripePaymentService {
     }    private String createStripeCheckoutSession(Order order, Transaction transaction, Product product) throws StripeException {        // Ensure seller has Stripe account - FIXED: Use seller, not buyer
         String sellerStripeAccountId = getOrCreateSellerStripeAccount(transaction.getSeller());
 
-        // VND is a zero-decimal currency - no need to multiply by 100
         long amountInVND = order.getTotalAmount().longValue();
         long platformFeeInVND = transaction.getPlatformFee().longValue();
 
@@ -242,8 +233,6 @@ public class StripePaymentService {
     }
 
     private String getOrCreateSellerStripeAccount(User seller) throws StripeException {
-        // For now, return a placeholder - you'll need to implement Stripe Connect properly
-        // This assumes you have stripe account fields in User entity
         AccountCreateParams params = AccountCreateParams.builder()
                 .setType(AccountCreateParams.Type.EXPRESS)
                 .setCountry("VN")
@@ -270,14 +259,11 @@ public class StripePaymentService {
                     .filter(ProductImage::getIsPrimary)
                     .map(ProductImage::getImageUrl)
                     .findFirst()
-                    .orElse(product.getImages().get(0).getImageUrl());
+                    .orElse(product.getImages().getFirst().getImageUrl());
         }
         return null;
     }
 
-    /**
-     * Handle successful payment webhook
-     */
     @Transactional
     public void handlePaymentSuccess(PaymentIntent paymentIntent) {
         try {
@@ -417,8 +403,8 @@ public class StripePaymentService {
 
     // Response DTOs
     @Getter
+    @Builder
     public static class PaymentResponse {
-        // Getters
         private Long orderId;
         private Long transactionId;
         private String productTitle;
@@ -428,61 +414,10 @@ public class StripePaymentService {
         private String checkoutUrl;
         private String status;
 
-        public static PaymentResponseBuilder builder() {
-            return new PaymentResponseBuilder();
-        }
-
-        public static class PaymentResponseBuilder {
-            private PaymentResponse response = new PaymentResponse();
-
-            public PaymentResponseBuilder orderId(Long orderId) {
-                response.orderId = orderId;
-                return this;
-            }
-
-            public PaymentResponseBuilder transactionId(Long transactionId) {
-                response.transactionId = transactionId;
-                return this;
-            }
-
-            public PaymentResponseBuilder productTitle(String productTitle) {
-                response.productTitle = productTitle;
-                return this;
-            }
-
-            public PaymentResponseBuilder amount(BigDecimal amount) {
-                response.amount = amount;
-                return this;
-            }
-
-            public PaymentResponseBuilder platformFee(BigDecimal platformFee) {
-                response.platformFee = platformFee;
-                return this;
-            }
-
-            public PaymentResponseBuilder sellerAmount(BigDecimal sellerAmount) {
-                response.sellerAmount = sellerAmount;
-                return this;
-            }
-
-            public PaymentResponseBuilder checkoutUrl(String checkoutUrl) {
-                response.checkoutUrl = checkoutUrl;
-                return this;
-            }
-
-            public PaymentResponseBuilder status(String status) {
-                response.status = status;
-                return this;
-            }
-
-            public PaymentResponse build() {
-                return response;
-            }
-        }
-
     }
 
     @Getter
+    @AllArgsConstructor
     public static class TransactionStatusResponse {
         private Long transactionId;
         private Long orderId;
@@ -496,26 +431,6 @@ public class StripePaymentService {
         private ProductInfo product;
         private UserInfo seller;
         private UserInfo buyer;
-
-        public TransactionStatusResponse(Long transactionId, Long orderId, String status, String escrowStatus,
-                                         BigDecimal amount, BigDecimal platformFee,
-                                         LocalDateTime createdAt, LocalDateTime paidAt,
-                                         LocalDateTime deliveredAt, ProductInfo product,
-                                         UserInfo seller, UserInfo buyer) {
-            this.transactionId = transactionId;
-            this.orderId = orderId;
-            this.status = status;
-            this.escrowStatus = escrowStatus;
-            this.amount = amount;
-            this.platformFee = platformFee;
-            this.createdAt = createdAt;
-            this.paidAt = paidAt;
-            this.deliveredAt = deliveredAt;
-            this.product = product;
-            this.seller = seller;
-            this.buyer = buyer;
-        }
-
     }
 
     @Data

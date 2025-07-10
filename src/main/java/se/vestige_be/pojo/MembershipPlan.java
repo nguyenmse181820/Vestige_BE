@@ -42,7 +42,7 @@ public class MembershipPlan {
     private TrustTier requiredTrustTier;
 
     @ManyToOne(fetch = FetchType.LAZY)
-    @JoinColumn(name = "fee_tier_id")
+    @JoinColumn(name = "tier_id")
     @ToString.Exclude
     private FeeTier feeTier;
 }
