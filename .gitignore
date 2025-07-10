@@ -16,7 +16,6 @@ target/
 # Environment variables
 .env
 .env.*
-!.env.example
 
 ### IntelliJ IDEA ###
 .idea
