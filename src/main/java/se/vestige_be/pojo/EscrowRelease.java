@@ -29,7 +29,7 @@ public class EscrowRelease {
     @Column(nullable = false, length = 20, columnDefinition = "varchar(20)")
     private String status;
 
-    @Column(length = 50, columnDefinition = "varchar(50)")
+    @Column(length = 50, columnDefinition = "varchar(255)")
     private String releaseReason;
 
     private LocalDateTime completedAt;

@@ -29,6 +29,7 @@ import se.vestige_be.dto.response.ProductListResponse;
 import se.vestige_be.pojo.User;
 import se.vestige_be.service.ProductService;
 import se.vestige_be.service.UserService;
+import se.vestige_be.service.MembershipService;
 import se.vestige_be.util.PaginationUtils;
 
 import java.math.BigDecimal;
@@ -48,6 +49,7 @@ public class ProductController {
 
     private final ProductService productService;
     private final UserService userService;
+    private final MembershipService membershipService;
     @Operation(
             summary = "Get all active products with filtering and pagination",
             description = "Retrieve a paginated list of active products. Supports filtering by search term, category, brand, price range, condition, and seller. This endpoint is public and returns only ACTIVE products by default."
@@ -794,6 +796,35 @@ public class ProductController {
                     .status(HttpStatus.BAD_REQUEST.toString())
                     .message("Product not previously liked")
                     .build());
+        }
+    }
+
+    @Operation(
+        summary = "Boost a product",
+        description = "Boost a product using membership benefits to increase its visibility."
+    )
+    @ApiResponses(value = {
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "200",
+            description = "Product boosted successfully"
+        ),
+        @io.swagger.v3.oas.annotations.responses.ApiResponse(
+            responseCode = "400",
+            description = "Failed to boost product - no active membership or no boosts remaining"
+        )
+    })
+    @PostMapping("/{id}/boost")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse> boostProduct(
+            @PathVariable Long id,
+            @AuthenticationPrincipal UserDetails userDetails) {
+        try {
+            User user = userService.findByUsername(userDetails.getUsername());
+            membershipService.boostProduct(user, id);
+            return ResponseEntity.ok(ApiResponse.success("Product boosted successfully", null));
+        } catch (Exception e) {
+            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
+                    .body(ApiResponse.error("Failed to boost product: " + e.getMessage()));
         }
     }
 }

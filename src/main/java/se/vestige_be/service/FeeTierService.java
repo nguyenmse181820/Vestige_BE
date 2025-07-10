@@ -5,10 +5,14 @@ import lombok.extern.slf4j.Slf4j;
 import org.springframework.stereotype.Service;
 import se.vestige_be.pojo.FeeTier;
 import se.vestige_be.pojo.User;
+import se.vestige_be.pojo.UserMembership;
+import se.vestige_be.pojo.enums.MembershipStatus;
 import se.vestige_be.repository.FeeTierRepository;
+import se.vestige_be.repository.UserMembershipRepository;
 
 import java.math.BigDecimal;
 import java.math.RoundingMode;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -16,6 +20,7 @@ import java.math.RoundingMode;
 public class FeeTierService {
 
     private final FeeTierRepository feeTierRepository;
+    private final UserMembershipRepository userMembershipRepository;
 
     /**
      * Calculate the platform fee for a given amount and seller
@@ -41,10 +46,9 @@ public class FeeTierService {
         }
 
         // Apply membership discount if applicable
-        // TODO: Check user's active membership and apply discount
-        // if (hasActiveMembership(seller) && feeTier.getMembershipDiscount() != null) {
-        //     baseFee = baseFee.subtract(feeTier.getMembershipDiscount());
-        // }
+        if (hasActiveMembership(seller) && feeTier.getMembershipDiscount() != null) {
+            baseFee = baseFee.subtract(feeTier.getMembershipDiscount());
+        }
 
         // Ensure fee doesn't go below 0
         return baseFee.max(BigDecimal.ZERO);
@@ -60,6 +64,15 @@ public class FeeTierService {
                 .legitProfileDiscount(new BigDecimal("1.0")) // 1% discount for legit profiles
                 .membershipDiscount(BigDecimal.ZERO)
                 .build();
+    }
+
+    /**
+     * Check if user has an active membership
+     */
+    private boolean hasActiveMembership(User seller) {
+        Optional<UserMembership> activeMembership = userMembershipRepository
+                .findByUserAndStatus(seller, MembershipStatus.ACTIVE);
+        return activeMembership.isPresent();
     }
 
     /**

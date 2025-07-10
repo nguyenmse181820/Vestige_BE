@@ -2,12 +2,9 @@ package se.vestige_be.pojo;
 
 import jakarta.persistence.*;
 import lombok.*;
-import org.hibernate.annotations.CreationTimestamp;
+import se.vestige_be.pojo.enums.TrustTier;
 
 import java.math.BigDecimal;
-import java.time.LocalDateTime;
-import java.util.ArrayList;
-import java.util.List;
 
 @Entity
 @Table(name = "membership_plans")
@@ -21,25 +18,31 @@ public class MembershipPlan {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long planId;
 
-    @Column(nullable = false, length = 50)
+    @Column(nullable = false, length = 100)
     private String name;
 
-    @Column(nullable = false, precision = 10, scale = 2)
-    private BigDecimal monthlyFee;
-
-    @Column(columnDefinition = "json")
-    private String benefits;
+    @Column(columnDefinition = "text")
+    private String description;
 
     @Column(nullable = false)
     @Builder.Default
-    private Boolean isActive = true;
+    private boolean isActive = true;
 
-    @CreationTimestamp
-    private LocalDateTime createdAt;
+    @Column(name = "price", nullable = false)
+    private BigDecimal price;
 
-    @OneToMany(mappedBy = "plan", cascade = {CascadeType.PERSIST, CascadeType.MERGE}, fetch = FetchType.LAZY)
-    @Builder.Default
+    @Column(name = "boosts_per_month", nullable = false)
+    private Integer boostsPerMonth;
+
+    @Column(name = "stripe_price_id", unique = true)
+    private String stripePriceId;
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "required_trust_tier")
+    private TrustTier requiredTrustTier;
+
+    @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "fee_tier_id")
     @ToString.Exclude
-    private List<UserMembership> userMemberships = new ArrayList<>();
-
+    private FeeTier feeTier;
 }

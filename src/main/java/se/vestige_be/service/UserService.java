@@ -22,7 +22,6 @@ import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.pojo.Role;
 import se.vestige_be.pojo.User;
-import se.vestige_be.pojo.Order;
 import se.vestige_be.pojo.enums.OrderStatus;
 import se.vestige_be.pojo.enums.ProductStatus;
 import se.vestige_be.repository.ProductRepository;
@@ -34,8 +33,6 @@ import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.List;
-import java.util.Map;
-import java.util.stream.Collectors;
 import java.util.Map;
 import java.util.stream.Collectors;
 
@@ -160,7 +157,7 @@ public class UserService {
                 .successfulTransactions(0)
                 .isLegitProfile(false)
                 .isVerified(false)
-                .trustScore(BigDecimal.ZERO)
+                .trustScore(100)
                 .accountStatus("active")
                 .joinedDate(LocalDateTime.now())
                 .addresses(new ArrayList<>())
@@ -303,7 +300,7 @@ public class UserService {
                 .sellerRating(BigDecimal.ZERO)
                 .sellerReviewsCount(0)
                 .successfulTransactions(0)
-                .trustScore(BigDecimal.ZERO)
+                .trustScore(100)
                 .joinedDate(LocalDateTime.now())
                 .addresses(new ArrayList<>())
                 .memberships(new ArrayList<>())
@@ -337,6 +334,7 @@ public class UserService {
                 .isVerified(user.getIsVerified())
                 .accountStatus(user.getAccountStatus())
                 .trustScore(user.getTrustScore())
+                .trustTier(user.getTrustTier())
                 .lastLoginAt(user.getLastLoginAt())
                 .roleName(user.getRole() != null ? user.getRole().getName() : null)
                 .totalProductsListed(totalProductsListed.intValue())
@@ -437,8 +435,8 @@ public class UserService {
         Long pendingOrders = getPendingOrdersForUser(userId);
         Long cancelledOrders = getCancelledOrdersForUser(userId);
         BigDecimal totalOrderValue = getTotalOrderValueForUser(userId);
-        BigDecimal averageOrderValue = totalOrders > 0 ? 
-            totalOrderValue.divide(BigDecimal.valueOf(totalOrders), 2, BigDecimal.ROUND_HALF_UP) : 
+        BigDecimal averageOrderValue = totalOrders > 0 ?
+                totalOrderValue.divide(BigDecimal.valueOf(totalOrders), 2, BigDecimal.ROUND_HALF_UP) :
             BigDecimal.ZERO;
 
         // Get product statistics

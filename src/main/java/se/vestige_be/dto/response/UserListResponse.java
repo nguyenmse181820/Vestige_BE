@@ -31,7 +31,7 @@ public class UserListResponse {
     private Boolean isLegitProfile;
     private Boolean isVerified;
     private String accountStatus;
-    private BigDecimal trustScore;
+    private Integer trustScore;
     private LocalDateTime lastLoginAt;
     private String roleName;
 

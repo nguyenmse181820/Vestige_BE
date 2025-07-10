@@ -3,14 +3,17 @@ package se.vestige_be.service;
 import com.stripe.Stripe;
 import com.stripe.exception.StripeException;
 import com.stripe.model.*;
+import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.*;
+import com.stripe.param.checkout.SessionCreateParams;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import se.vestige_be.exception.BusinessLogicException;
+import se.vestige_be.pojo.MembershipPlan;
 import se.vestige_be.pojo.OrderItem;
 import se.vestige_be.pojo.Transaction;
 import se.vestige_be.pojo.User;
@@ -33,14 +36,16 @@ public class StripeService {
 
     private final OrderService orderService;
     private final UserService userService;
+    private final MembershipService membershipService;
     
     // Simple in-memory storage for processed webhook events
     // In production, this should be stored in database
     private final Set<String> processedEventIds = ConcurrentHashMap.newKeySet();
 
-    public StripeService(@Lazy OrderService orderService, @Lazy UserService userService) {
+    public StripeService(@Lazy OrderService orderService, @Lazy UserService userService, @Lazy MembershipService membershipService) {
         this.orderService = orderService;
         this.userService = userService;
+        this.membershipService = membershipService;
     }
 
     @PostConstruct
@@ -479,7 +484,16 @@ public class StripeService {
                         log.info("Payout {} of {} {} created for seller. Destination: {}",
                                 payout.getId(), payout.getAmount(), payout.getCurrency().toUpperCase(), payout.getDestination());
                     }
-                    break;                default:
+                    break;
+
+                // Subscription webhook events
+                case "invoice.payment_succeeded":
+                case "customer.subscription.deleted":
+                case "customer.subscription.created":
+                    processSubscriptionWebhook(event);
+                    break;
+
+                default:
                     log.debug("Unhandled webhook event: {} - Event ID: {}", event.getType(), eventId);
             }
             
@@ -642,6 +656,117 @@ public class StripeService {
             log.error("Failed to transfer funds to seller account {}: {} (transaction {})",
                     destinationAccountId, e.getMessage(), transactionId);
             throw e;
+        }
+    }
+
+    /**
+     * Create a Stripe Checkout Session for subscription
+     */
+    public String createSubscriptionCheckoutSession(User user, MembershipPlan plan) {
+        try {
+            SessionCreateParams params = SessionCreateParams.builder()
+                    .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
+                    .setSuccessUrl("https://your-domain.com/success?session_id={CHECKOUT_SESSION_ID}")
+                    .setCancelUrl("https://your-domain.com/cancel")
+                    .setCustomerEmail(user.getEmail())
+                    .addLineItem(
+                            SessionCreateParams.LineItem.builder()
+                                    .setPrice(plan.getStripePriceId())
+                                    .setQuantity(1L)
+                                    .build()
+                    )
+                    .putMetadata("user_id", user.getUserId().toString())
+                    .putMetadata("plan_id", plan.getPlanId().toString())
+                    .build();
+
+            Session session = Session.create(params);
+            log.info("Created subscription checkout session {} for user {} and plan {}", 
+                    session.getId(), user.getUsername(), plan.getName());
+            
+            return session.getUrl();
+        } catch (StripeException e) {
+            log.error("Failed to create subscription checkout session for user {}: {}", 
+                    user.getUsername(), e.getMessage());
+            throw new BusinessLogicException("Failed to create subscription checkout session: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Cancel a Stripe subscription
+     */
+    public void cancelSubscription(String stripeSubscriptionId) {
+        try {
+            Subscription subscription = Subscription.retrieve(stripeSubscriptionId);
+            subscription.cancel();
+            log.info("Cancelled subscription {}", stripeSubscriptionId);
+        } catch (StripeException e) {
+            log.error("Failed to cancel subscription {}: {}", stripeSubscriptionId, e.getMessage());
+            throw new BusinessLogicException("Failed to cancel subscription: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Process Stripe webhook events for subscriptions
+     */
+    public void processSubscriptionWebhook(Event event) {
+        try {
+            switch (event.getType()) {
+                case "invoice.payment_succeeded":
+                    handleInvoicePaymentSucceeded(event);
+                    break;
+                case "customer.subscription.deleted":
+                    handleSubscriptionDeleted(event);
+                    break;
+                case "customer.subscription.created":
+                    handleSubscriptionCreated(event);
+                    break;
+                default:
+                    log.info("Unhandled subscription event type: {}", event.getType());
+            }
+        } catch (Exception e) {
+            log.error("Error processing subscription webhook event {}: {}", event.getType(), e.getMessage());
+            throw new BusinessLogicException("Failed to process webhook event: " + e.getMessage());
+        }
+    }
+
+    private void handleInvoicePaymentSucceeded(Event event) {
+        try {
+            StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
+            if (stripeObject instanceof Invoice invoice) {
+                String subscriptionId = invoice.getSubscription();
+                if (subscriptionId != null) {
+                    log.info("Processing invoice payment succeeded for subscription: {}", subscriptionId);
+                    membershipService.renewMembership(subscriptionId);
+                }
+            }
+        } catch (Exception e) {
+            log.error("Error handling invoice payment succeeded: {}", e.getMessage());
+        }
+    }
+
+    private void handleSubscriptionDeleted(Event event) {
+        try {
+            StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
+            if (stripeObject instanceof Subscription subscription) {
+                log.info("Processing subscription deleted for subscription: {}", subscription.getId());
+                membershipService.deactivateSubscription(subscription.getId());
+            }
+        } catch (Exception e) {
+            log.error("Error handling subscription deleted: {}", e.getMessage());
+        }
+    }
+
+    private void handleSubscriptionCreated(Event event) {
+        try {
+            StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
+            if (stripeObject instanceof Subscription subscription) {
+                log.info("Processing subscription created for subscription: {}", subscription.getId());
+                // Find the plan from subscription metadata or price ID
+                // This would typically be handled via the checkout completion rather than subscription creation
+                log.info("Subscription created: {}, status: {}", subscription.getId(), subscription.getStatus());
+            }
+        } catch (Exception e) {
+            log.error("Error handling subscription created: {}", e.getMessage());
         }
     }
 }

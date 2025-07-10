@@ -54,4 +54,12 @@ public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpeci
     // Add method for finding last product listing date for a user
     @Query("SELECT MAX(p.createdAt) FROM Product p WHERE p.seller.userId = :sellerId")
     LocalDateTime findLastListingDateBySellerUserId(@Param("sellerId") Long sellerId);
+    
+    // Find products with boost priority - boosted products appear first
+    @Query("SELECT p FROM Product p LEFT JOIN ProductBoost b ON p.productId = b.product.productId " +
+           "WHERE p.status = :status AND (b.boostEndTime > :now OR b.id IS NULL) " +
+           "ORDER BY CASE WHEN b.id IS NOT NULL THEN 0 ELSE 1 END, p.createdAt DESC")
+    Page<Product> findProductsWithBoostPriority(@Param("status") ProductStatus status, 
+                                               @Param("now") LocalDateTime now, 
+                                               Pageable pageable);
 }
