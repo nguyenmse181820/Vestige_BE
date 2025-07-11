@@ -5,6 +5,7 @@ import lombok.Builder;
 import lombok.Data;
 import lombok.NoArgsConstructor;
 import se.vestige_be.pojo.enums.Gender;
+import se.vestige_be.pojo.enums.TrustTier;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -32,7 +33,8 @@ public class UserProfileResponse {
     private Boolean isLegitProfile;
     private Boolean isVerified;
     private String accountStatus;
-    private BigDecimal trustScore;
+    private Integer trustScore;
+    private TrustTier trustTier;
     private LocalDateTime lastLoginAt;
     private String roleName;
 

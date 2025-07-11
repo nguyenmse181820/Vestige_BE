@@ -3,14 +3,17 @@ package se.vestige_be.service;
 import com.stripe.Stripe;
 import com.stripe.exception.StripeException;
 import com.stripe.model.*;
+import com.stripe.model.checkout.Session;
 import com.stripe.net.Webhook;
 import com.stripe.param.*;
+import com.stripe.param.checkout.SessionCreateParams;
 import jakarta.annotation.PostConstruct;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Lazy;
 import org.springframework.stereotype.Service;
 import se.vestige_be.exception.BusinessLogicException;
+import se.vestige_be.pojo.MembershipPlan;
 import se.vestige_be.pojo.OrderItem;
 import se.vestige_be.pojo.Transaction;
 import se.vestige_be.pojo.User;
@@ -479,7 +482,9 @@ public class StripeService {
                         log.info("Payout {} of {} {} created for seller. Destination: {}",
                                 payout.getId(), payout.getAmount(), payout.getCurrency().toUpperCase(), payout.getDestination());
                     }
-                    break;                default:
+                    break;
+
+                default:
                     log.debug("Unhandled webhook event: {} - Event ID: {}", event.getType(), eventId);
             }
             
@@ -546,6 +551,18 @@ public class StripeService {
             throw e;
         }
     }
+
+    public Session retrieveCheckoutSession(String sessionId) throws StripeException {
+        try {
+            Session session = Session.retrieve(sessionId);
+            log.info("Retrieved checkout session {}", sessionId);
+            return session;
+        } catch (StripeException e) {
+            log.error("Failed to retrieve checkout session {}: {}", sessionId, e.getMessage());
+            throw e;
+        }
+    }
+
 
     /**
      * Gets detailed payment status for a PaymentIntent

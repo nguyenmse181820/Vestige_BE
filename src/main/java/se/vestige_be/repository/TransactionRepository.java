@@ -40,4 +40,7 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
     // Count methods for statistics
     long countByEscrowStatus(EscrowStatus escrowStatus);
     long countByDisputeStatus(se.vestige_be.pojo.enums.DisputeStatus disputeStatus);
+    
+    // New method for trust score calculations
+    long countBySellerAndDisputeStatusAndCreatedAtAfter(se.vestige_be.pojo.User seller, se.vestige_be.pojo.enums.DisputeStatus disputeStatus, LocalDateTime date);
 }

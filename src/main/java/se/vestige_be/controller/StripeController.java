@@ -18,6 +18,7 @@ import se.vestige_be.dto.response.ApiResponse;
 import se.vestige_be.pojo.User;
 import se.vestige_be.service.StripeService;
 import se.vestige_be.service.UserService;
+import se.vestige_be.service.MembershipService;
 
 import java.util.Map;
 
@@ -29,6 +30,7 @@ public class StripeController {
 
     private final StripeService stripeService;
     private final UserService userService;
+    private final MembershipService membershipService;
 
     @Value("${app.frontend.url:http://localhost:3000}")
     private String frontendUrl;

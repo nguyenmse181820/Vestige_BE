@@ -5,6 +5,7 @@ import jakarta.persistence.*;
 import lombok.*;
 import org.hibernate.annotations.CreationTimestamp;
 import se.vestige_be.pojo.enums.Gender;
+import se.vestige_be.pojo.enums.TrustTier;
 
 import java.math.BigDecimal;
 import java.time.LocalDate;
@@ -100,9 +101,14 @@ public class User {
         return "active".equals(this.accountStatus);
     }
 
-    @Column(precision = 3, scale = 2)
+    @Column(name = "trust_score")
     @Builder.Default
-    private BigDecimal trustScore = BigDecimal.ZERO;
+    private Integer trustScore = 100; // Default score for new users
+
+    @Enumerated(EnumType.STRING)
+    @Column(name = "trust_tier")
+    @Builder.Default
+    private TrustTier trustTier = TrustTier.NEW_SELLER; // Default tier
 
     private LocalDateTime lastLoginAt;
 

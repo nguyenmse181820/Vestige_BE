@@ -30,6 +30,7 @@ import se.vestige_be.repository.ProductImageRepository;
 import se.vestige_be.repository.ProductRepository;
 import se.vestige_be.repository.UserRepository;
 import se.vestige_be.repository.ProductLikeRepository;
+import se.vestige_be.repository.ProductBoostRepository;
 import se.vestige_be.util.PaginationUtils;
 import se.vestige_be.util.SlugUtils;
 
@@ -54,11 +55,42 @@ public class ProductService {
     private final BrandRepository brandRepository;
     private final ProductImageRepository productImageRepository;
     private final ProductLikeRepository productLikeRepository;
+    private final ProductBoostRepository productBoostRepository;
 
     public Page<ProductListResponse> getProducts(ProductFilterResponse filterDto, Pageable pageable) {
-        Specification<Product> spec = buildProductSpecification(filterDto);
-        Page<Product> products = productRepository.findAll(spec, pageable);
-        return products.map(this::convertToListResponse);
+        // Check if this is a simple query with default sorting that can benefit from boost prioritization
+        if (isSimpleQuery(filterDto) && isDefaultSorting(pageable)) {
+            // Use boost prioritization for simple queries
+            Page<Product> products = productRepository.findProductsWithBoostPriority(
+                    ProductStatus.ACTIVE, LocalDateTime.now(), pageable);
+            return products.map(this::convertToListResponse);
+        } else {
+            // Use specification-based query for complex filtering
+            Specification<Product> spec = buildProductSpecification(filterDto);
+            Page<Product> products = productRepository.findAll(spec, pageable);
+            return products.map(this::convertToListResponse);
+        }
+    }
+
+    private boolean isSimpleQuery(ProductFilterResponse filterDto) {
+        // Consider it simple if no complex filters are applied
+        return filterDto.getSearch() == null &&
+               filterDto.getCategoryId() == null &&
+               filterDto.getBrandId() == null &&
+               filterDto.getMinPrice() == null &&
+               filterDto.getMaxPrice() == null &&
+               filterDto.getCondition() == null &&
+               filterDto.getSellerId() == null &&
+               (filterDto.getStatus() == null || "ACTIVE".equals(filterDto.getStatus()));
+    }
+
+    private boolean isDefaultSorting(Pageable pageable) {
+        // Check if sorting is by createdAt desc (default) or no sorting
+        if (pageable.getSort().isEmpty()) {
+            return true;
+        }
+        return pageable.getSort().stream()
+                .anyMatch(order -> "createdAt".equals(order.getProperty()) && order.isDescending());
     }
 
     @Transactional(readOnly = true)

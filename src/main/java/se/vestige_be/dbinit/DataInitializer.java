@@ -82,10 +82,10 @@ public class DataInitializer implements CommandLineRunner {
                 String encodedPassword = passwordEncoder.encode(commonPassword);
 
                 List<User> users = new ArrayList<>();
-                users.add(User.builder().username("admin").email("admin@vestige.com").passwordHash(encodedPassword).firstName("Admin").lastName("User").bio("Platform administrator").role(adminRole).isVerified(true).accountStatus("active").trustScore(new BigDecimal("5.0")).build());
-                users.add(User.builder().username("johndoe").email("john.doe@example.com").passwordHash(encodedPassword).firstName("John").lastName("Doe").bio("Fashion enthusiast and collector").role(userRole).isVerified(true).accountStatus("active").sellerRating(new BigDecimal("4.5")).sellerReviewsCount(25).successfulTransactions(20).trustScore(new BigDecimal("4.2")).build());
-                users.add(User.builder().username("jansmith").email("jane.smith@example.com").passwordHash(encodedPassword).firstName("Jane").lastName("Smith").bio("Luxury handbag specialist").role(userRole).isVerified(true).isLegitProfile(true).accountStatus("active").sellerRating(new BigDecimal("4.8")).sellerReviewsCount(45).successfulTransactions(38).trustScore(new BigDecimal("4.7")).build());
-                users.add(User.builder().username("mikewilson").email("mike.wilson@example.com").passwordHash(encodedPassword).firstName("Mike").lastName("Wilson").bio("Watch collector and trader").role(userRole).isVerified(true).accountStatus("active").sellerRating(new BigDecimal("4.3")).sellerReviewsCount(12).successfulTransactions(10).trustScore(new BigDecimal("4.0")).build());
+                users.add(User.builder().username("admin").email("admin@vestige.com").passwordHash(encodedPassword).firstName("Admin").lastName("User").bio("Platform administrator").role(adminRole).isVerified(true).accountStatus("active").trustScore(100).build());
+                users.add(User.builder().username("johndoe").email("john.doe@example.com").passwordHash(encodedPassword).firstName("John").lastName("Doe").bio("Fashion enthusiast and collector").role(userRole).isVerified(true).accountStatus("active").sellerRating(new BigDecimal("4.5")).sellerReviewsCount(25).successfulTransactions(20).trustScore(84).build());
+                users.add(User.builder().username("jansmith").email("jane.smith@example.com").passwordHash(encodedPassword).firstName("Jane").lastName("Smith").bio("Luxury handbag specialist").role(userRole).isVerified(true).isLegitProfile(true).accountStatus("active").sellerRating(new BigDecimal("4.8")).sellerReviewsCount(45).successfulTransactions(38).trustScore(94).build());
+                users.add(User.builder().username("mikewilson").email("mike.wilson@example.com").passwordHash(encodedPassword).firstName("Mike").lastName("Wilson").bio("Watch collector and trader").role(userRole).isVerified(true).accountStatus("active").sellerRating(new BigDecimal("4.3")).sellerReviewsCount(12).successfulTransactions(10).trustScore(80).build());
                 users.add(User.builder()
                     .username("shipper01")
                     .email("shipping@vestige.com")
@@ -95,7 +95,7 @@ public class DataInitializer implements CommandLineRunner {
                     .role(shipperRole)
                     .isVerified(true)
                     .accountStatus("active")
-                    .trustScore(new BigDecimal("5.0"))
+                    .trustScore(100)
                     .build());
                 
                 // Create second shipper user with different password
@@ -110,7 +110,7 @@ public class DataInitializer implements CommandLineRunner {
                     .role(shipperRole)
                     .isVerified(true)
                     .accountStatus("active")
-                    .trustScore(new BigDecimal("5.0"))
+                    .trustScore(100)
                     .build());
                 userRepository.saveAll(users);
                 System.out.println("Default users have been created:");

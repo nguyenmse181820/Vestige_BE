@@ -6,9 +6,11 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 import se.vestige_be.pojo.OrderItem;
+import se.vestige_be.pojo.User;
 import se.vestige_be.pojo.enums.OrderItemStatus;
 import se.vestige_be.pojo.enums.EscrowStatus;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
@@ -58,4 +60,11 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     @Query("SELECT oi FROM OrderItem oi WHERE oi.order.createdAt BETWEEN :startDate AND :endDate")
     List<OrderItem> findByOrderCreatedAtBetween(@Param("startDate") java.time.LocalDateTime startDate, 
                                                @Param("endDate") java.time.LocalDateTime endDate);
+    
+    // New methods for trust score calculations
+    @Query("SELECT COUNT(oi) FROM OrderItem oi WHERE oi.seller = :seller AND oi.status = :status AND oi.order.createdAt > :date")
+    long countBySellerAndStatusAndCreatedAtAfter(@Param("seller") User seller, @Param("status") OrderItemStatus status, @Param("date") LocalDateTime date);
+    
+    @Query("SELECT COUNT(oi) FROM OrderItem oi WHERE oi.order.buyer = :buyer AND oi.status = :status AND oi.order.createdAt > :date")
+    long countByOrderBuyerAndStatusAndCreatedAtAfter(@Param("buyer") User buyer, @Param("status") OrderItemStatus status, @Param("date") LocalDateTime date);
 }

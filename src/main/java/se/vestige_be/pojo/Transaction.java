@@ -88,6 +88,8 @@ public class Transaction {
 
     private String stripeTransferId;
 
+    private String payosOrderCode;
+
     @CreationTimestamp
     private LocalDateTime createdAt;
 
