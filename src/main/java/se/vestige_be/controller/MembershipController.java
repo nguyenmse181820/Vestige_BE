@@ -8,6 +8,7 @@ import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
+import se.vestige_be.dto.UserMembershipDTO;
 import se.vestige_be.dto.response.ApiResponse;
 import se.vestige_be.pojo.MembershipPlan;
 import se.vestige_be.pojo.UserMembership;
@@ -37,18 +38,12 @@ public class MembershipController {
     }
 
     @GetMapping("/current")
-    public ResponseEntity<ApiResponse<UserMembership>> getCurrentMembership(@AuthenticationPrincipal UserDetails currentUser) {
-        if (currentUser == null) {
-            return new ResponseEntity<>(ApiResponse.error("Unauthorized: User must be authenticated."), HttpStatus.UNAUTHORIZED);
-        }
-        try {
-            Optional<UserMembership> activeMembership = membershipService.getActiveMembership(currentUser);
-            return activeMembership.<ResponseEntity<ApiResponse<UserMembership>>>map(userMembership -> ResponseEntity.ok(ApiResponse.success("Active membership retrieved successfully",
-                    userMembership))).orElseGet(() -> ResponseEntity.ok(ApiResponse.success("No active membership found", null)));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error("Failed to retrieve current membership: " + e.getMessage()));
-        }
+    public ResponseEntity<ApiResponse<UserMembershipDTO>> getActiveMembership(@AuthenticationPrincipal UserDetails currentUser) {
+        Optional<UserMembershipDTO> activeMembership = membershipService.getActiveMembership(currentUser);
+
+        return activeMembership
+                .map(membershipDTO -> ResponseEntity.ok(ApiResponse.success("Active membership found.", membershipDTO)))
+                .orElseGet(() -> ResponseEntity.ok(ApiResponse.success("No active membership found.", null)));
     }
 
     @PostMapping("/subscribe/{planId}")
@@ -66,6 +61,23 @@ public class MembershipController {
         } catch (Exception e) {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to create subscription: " + e.getMessage()));
+        }
+    }
+
+    @PostMapping("/confirm-subscription")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<UserMembershipDTO>> confirmSubscription(
+            @RequestParam("session_id") String sessionId,
+            @AuthenticationPrincipal UserDetails currentUser) {
+        if (currentUser == null) {
+            return new ResponseEntity<>(ApiResponse.error("Unauthorized: User must be authenticated."), HttpStatus.UNAUTHORIZED);
+        }
+        try {
+            UserMembershipDTO membership = membershipService.confirmSubscription(sessionId, currentUser);
+            return ResponseEntity.ok(ApiResponse.success("Subscription confirmed and activated successfully.", membership));
+        } catch (Exception e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.error("Failed to confirm subscription: " + e.getMessage()));
         }
     }
 

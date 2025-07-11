@@ -485,6 +485,11 @@ public class StripeService {
                                 payout.getId(), payout.getAmount(), payout.getCurrency().toUpperCase(), payout.getDestination());
                     }
                     break;
+                case "checkout.session.completed":
+                    if (stripeObject instanceof Session session) {
+                        handleCheckoutSessionCompleted(session);
+                    }
+                    break;
 
                 // Subscription webhook events
                 case "invoice.payment_succeeded":
@@ -561,6 +566,18 @@ public class StripeService {
         }
     }
 
+    public Session retrieveCheckoutSession(String sessionId) throws StripeException {
+        try {
+            Session session = Session.retrieve(sessionId);
+            log.info("Retrieved checkout session {}", sessionId);
+            return session;
+        } catch (StripeException e) {
+            log.error("Failed to retrieve checkout session {}: {}", sessionId, e.getMessage());
+            throw e;
+        }
+    }
+
+
     /**
      * Gets detailed payment status for a PaymentIntent
      */
@@ -571,6 +588,23 @@ public class StripeService {
         } catch (StripeException e) {
             log.error("Failed to get payment status for {}: {}", paymentIntentId, e.getMessage());
             throw e;
+        }
+    }
+
+    private void handleCheckoutSessionCompleted(Session session) {
+        String clientReferenceId = session.getClientReferenceId();
+        String subscriptionId = session.getSubscription();
+        Map<String, String> metadata = session.getMetadata();
+        Long userId = Long.parseLong(metadata.get("user_id"));
+        Long planId = Long.parseLong(metadata.get("plan_id"));
+
+        if ("subscription".equals(session.getMode())) {
+            if (subscriptionId != null && userId != null && planId != null) {
+                log.info("Activating subscription for user {} and plan {}", userId, planId);
+                membershipService.activateSubscription(subscriptionId, userId, planId);
+            } else {
+                log.error("Missing data in checkout session for subscription activation. Session ID: {}", session.getId());
+            }
         }
     }
 

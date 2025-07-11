@@ -1,18 +1,24 @@
 package se.vestige_be.service;
 
+import com.stripe.exception.StripeException;
+import com.stripe.model.checkout.Session;
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import se.vestige_be.dto.UserMembershipDTO;
 import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
+import se.vestige_be.exception.UnauthorizedException;
+import se.vestige_be.mapper.ModelMapper;
 import se.vestige_be.pojo.*;
 import se.vestige_be.pojo.enums.MembershipStatus;
 import se.vestige_be.repository.*;
 
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Map;
 import java.util.Optional;
 
 @Service
@@ -26,6 +32,7 @@ public class MembershipService {
     private final ProductRepository productRepository;
     private final UserRepository userRepository;
     private final StripeService stripeService;
+    private final ModelMapper modelMapper;
 
     @Transactional(readOnly = true)
     public List<MembershipPlan> getAllPlans() {
@@ -33,10 +40,12 @@ public class MembershipService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<UserMembership> getActiveMembership(UserDetails currentUserDetails) {
+    public Optional<UserMembershipDTO> getActiveMembership(UserDetails currentUserDetails) {
         User user = userRepository.findByUsername(currentUserDetails.getUsername())
                 .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
-        return userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE);
+
+        return userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE)
+                .map(modelMapper::toUserMembershipDTO);
     }
 
     @Transactional
@@ -86,6 +95,39 @@ public class MembershipService {
             userMembershipRepository.save(activeMembership);
             log.warn("Cancelled local membership for user {} without a Stripe subscription ID.", user.getUsername());
         }
+    }
+
+    @Transactional
+    public UserMembershipDTO confirmSubscription(String sessionId, UserDetails currentUserDetails) {
+        User user = userRepository.findByUsername(currentUserDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
+
+        Session session;
+        try {
+            session = stripeService.retrieveCheckoutSession(sessionId);
+        } catch (StripeException e) {
+            throw new BusinessLogicException("Could not retrieve checkout session from Stripe: " + e.getMessage());
+        }
+
+        if (!"paid".equals(session.getPaymentStatus())) {
+            throw new BusinessLogicException("Subscription payment not completed for session: " + sessionId);
+        }
+
+        String subscriptionId = session.getSubscription();
+        Map<String, String> metadata = session.getMetadata();
+        Long userIdFromMeta = Long.parseLong(metadata.get("user_id"));
+        Long planIdFromMeta = Long.parseLong(metadata.get("plan_id"));
+
+        if (!user.getUserId().equals(userIdFromMeta)) {
+            throw new UnauthorizedException("Session does not belong to the authenticated user.");
+        }
+        activateSubscription(subscriptionId, userIdFromMeta, planIdFromMeta);
+
+        UserMembership membership = userMembershipRepository.findByStripeSubscriptionId(session.getSubscription())
+                .orElseThrow(() -> new IllegalStateException("Membership could not be found after activation."));
+
+        return modelMapper.toUserMembershipDTO(membership);
+
     }
 
     @Transactional
