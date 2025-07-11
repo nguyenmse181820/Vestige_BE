@@ -2,18 +2,18 @@ package se.vestige_be.controller;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.access.prepost.PreAuthorize;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import se.vestige_be.dto.response.ApiResponse;
 import se.vestige_be.pojo.MembershipPlan;
-import se.vestige_be.pojo.ProductBoost;
-import se.vestige_be.pojo.User;
 import se.vestige_be.pojo.UserMembership;
 import se.vestige_be.service.MembershipService;
 
 import java.util.List;
-import java.util.Map;
 import java.util.Optional;
 
 @RestController
@@ -25,11 +25,8 @@ public class MembershipController {
 
     private final MembershipService membershipService;
 
-    /**
-     * Get all available membership plans
-     */
     @GetMapping("/plans")
-    public ResponseEntity<ApiResponse> getAllPlans() {
+    public ResponseEntity<ApiResponse<List<MembershipPlan>>> getAllPlans() {
         try {
             List<MembershipPlan> plans = membershipService.getAllPlans();
             return ResponseEntity.ok(ApiResponse.success("Membership plans retrieved successfully", plans));
@@ -39,71 +36,50 @@ public class MembershipController {
         }
     }
 
-    /**
-     * Get current user's active membership
-     */
     @GetMapping("/current")
-    public ResponseEntity<ApiResponse> getCurrentMembership(@AuthenticationPrincipal User currentUser) {
+    public ResponseEntity<ApiResponse<UserMembership>> getCurrentMembership(@AuthenticationPrincipal UserDetails currentUser) {
+        if (currentUser == null) {
+            return new ResponseEntity<>(ApiResponse.error("Unauthorized: User must be authenticated."), HttpStatus.UNAUTHORIZED);
+        }
         try {
             Optional<UserMembership> activeMembership = membershipService.getActiveMembership(currentUser);
-            if (activeMembership.isPresent()) {
-                return ResponseEntity.ok(ApiResponse.success("Active membership retrieved successfully",
-                        activeMembership.get()));
-            } else {
-                return ResponseEntity.ok(ApiResponse.success("No active membership found", null));
-            }
+            return activeMembership.<ResponseEntity<ApiResponse<UserMembership>>>map(userMembership -> ResponseEntity.ok(ApiResponse.success("Active membership retrieved successfully",
+                    userMembership))).orElseGet(() -> ResponseEntity.ok(ApiResponse.success("No active membership found", null)));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to retrieve current membership: " + e.getMessage()));
         }
     }
 
-    /**
-     * Subscribe to a membership plan. Returns a Stripe Checkout URL.
-     */
     @PostMapping("/subscribe/{planId}")
-    public ResponseEntity<ApiResponse> subscribe(@PathVariable Long planId,
-                                                 @AuthenticationPrincipal User currentUser) {
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<String>> subscribe(@PathVariable Long planId,
+                                                         @AuthenticationPrincipal UserDetails currentUser) {
+
+        if (currentUser == null) {
+            return new ResponseEntity<>(ApiResponse.error("Unauthorized: User must be authenticated."), HttpStatus.UNAUTHORIZED);
+        }
         try {
-            // The service returns the Stripe Checkout URL as a String
+            log.info("User {} is subscribing to plan {}", currentUser.getUsername(), planId);
             String checkoutUrl = membershipService.subscribe(currentUser, planId);
-
-            // Return the URL in a structured response for the frontend to use
-            Map<String, String> responseData = Map.of("checkoutUrl", checkoutUrl);
-
-            return ResponseEntity.ok(ApiResponse.success("Stripe checkout session created. Please redirect to the provided URL.", responseData));
+            return ResponseEntity.ok(ApiResponse.success("Successfully subscribed to plan.", checkoutUrl));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to create subscription: " + e.getMessage()));
         }
     }
 
-    /**
-     * Cancel current subscription
-     */
     @DeleteMapping("/cancel")
-    public ResponseEntity<ApiResponse> cancelSubscription(@AuthenticationPrincipal User currentUser) {
+    public ResponseEntity<ApiResponse<Void>> cancelSubscription(@AuthenticationPrincipal UserDetails currentUser) {
+        if (currentUser == null) {
+            return new ResponseEntity<>(ApiResponse.error("Unauthorized: User must be authenticated."), HttpStatus.UNAUTHORIZED);
+        }
         try {
             membershipService.cancelSubscription(currentUser);
             return ResponseEntity.ok(ApiResponse.success("Subscription cancellation requested successfully. It will be deactivated at the end of the current billing period.", null));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to cancel subscription: " + e.getMessage()));
-        }
-    }
-
-    /**
-     * Boost a product using membership benefits
-     */
-    @PostMapping("/boost/{productId}")
-    public ResponseEntity<ApiResponse> boostProduct(@PathVariable Long productId,
-                                                    @AuthenticationPrincipal User currentUser) {
-        try {
-            ProductBoost boost = membershipService.boostProduct(currentUser, productId);
-            return ResponseEntity.ok(ApiResponse.success("Product boosted successfully", boost));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error("Failed to boost product: " + e.getMessage()));
         }
     }
 }

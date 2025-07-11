@@ -2,9 +2,11 @@ package se.vestige_be.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.exception.BusinessLogicException;
+import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.pojo.*;
 import se.vestige_be.pojo.enums.MembershipStatus;
 import se.vestige_be.repository.*;
@@ -31,13 +33,18 @@ public class MembershipService {
     }
 
     @Transactional(readOnly = true)
-    public Optional<UserMembership> getActiveMembership(User user) {
+    public Optional<UserMembership> getActiveMembership(UserDetails currentUserDetails) {
+        User user = userRepository.findByUsername(currentUserDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
         return userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE);
     }
 
     @Transactional
-    public String subscribe(User user, Long planId) {
-        if (getActiveMembership(user).isPresent()) {
+    public String subscribe(UserDetails currentUserDetails, Long planId) {
+        User user = userRepository.findByUsername(currentUserDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
+
+        if (userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE).isPresent()) {
             throw new BusinessLogicException("User already has an active subscription.");
         }
 
@@ -58,12 +65,16 @@ public class MembershipService {
                 .build();
         userMembershipRepository.save(userMembership);
 
+        // Pass user and plan IDs to Stripe for the webhook
         return stripeService.createSubscriptionCheckoutSession(user, plan);
     }
 
     @Transactional
-    public void cancelSubscription(User user) {
-        UserMembership activeMembership = getActiveMembership(user)
+    public void cancelSubscription(UserDetails currentUserDetails) {
+        User user = userRepository.findByUsername(currentUserDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
+
+        UserMembership activeMembership = userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessLogicException("No active subscription found."));
 
         if (activeMembership.getStripeSubscriptionId() != null) {
@@ -78,8 +89,11 @@ public class MembershipService {
     }
 
     @Transactional
-    public ProductBoost boostProduct(User user, Long productId) {
-        UserMembership activeMembership = getActiveMembership(user)
+    public ProductBoost boostProduct(UserDetails currentUserDetails, Long productId) {
+        User user = userRepository.findByUsername(currentUserDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
+
+        UserMembership activeMembership = userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessLogicException("You must have an active membership to boost products."));
 
         if (activeMembership.getBoostsRemaining() == null || activeMembership.getBoostsRemaining() <= 0) {
@@ -157,9 +171,6 @@ public class MembershipService {
                 .orElseThrow(() -> new BusinessLogicException("Membership not found for subscription"));
 
         membership.setStatus(MembershipStatus.CANCELLED);
-        // The end date is when the subscription truly ends, which might be in the future if cancelled mid-period.
-        // Stripe's 'customer.subscription.deleted' webhook fires when the subscription is truly gone.
-        // For simplicity here, we set it to now. A more advanced implementation might use the 'current_period_end' from the Stripe event.
         membership.setEndDate(LocalDateTime.now());
 
         userMembershipRepository.save(membership);

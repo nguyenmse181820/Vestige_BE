@@ -14,6 +14,7 @@ import se.vestige_be.pojo.MembershipPlan;
 import se.vestige_be.repository.FeeTierRepository;
 import se.vestige_be.repository.MembershipPlanRepository;
 
+import java.time.LocalDateTime;
 import java.util.List;
 
 @RestController
@@ -53,10 +54,10 @@ public class AdminMembershipController {
                 .requiredTrustTier(request.getRequiredTrustTier())
                 .feeTier(feeTier)
                 .isActive(request.isActive())
+                .createdAt(LocalDateTime.now())
                 .build();
 
         MembershipPlan savedPlan = membershipPlanRepository.save(newPlan);
-        log.info("Created new membership plan: {}", savedPlan.getName());
         return ResponseEntity.ok(ApiResponse.success("Membership plan created successfully", savedPlan));
     }
 
@@ -76,9 +77,9 @@ public class AdminMembershipController {
         existingPlan.setRequiredTrustTier(request.getRequiredTrustTier());
         existingPlan.setFeeTier(feeTier);
         existingPlan.setActive(request.isActive());
+        existingPlan.setUpdatedAt(LocalDateTime.now());
 
         MembershipPlan updatedPlan = membershipPlanRepository.save(existingPlan);
-        log.info("Updated membership plan: {}", updatedPlan.getName());
         return ResponseEntity.ok(ApiResponse.success("Membership plan updated successfully", updatedPlan));
     }
 
@@ -88,7 +89,6 @@ public class AdminMembershipController {
             throw new ResourceNotFoundException("Membership plan not found with id: " + id);
         }
         membershipPlanRepository.deleteById(id);
-        log.info("Deleted membership plan with id: {}", id);
         return ResponseEntity.ok(ApiResponse.success("Membership plan deleted successfully", null));
     }
 
@@ -98,9 +98,9 @@ public class AdminMembershipController {
                 .orElseThrow(() -> new ResourceNotFoundException("Membership plan not found with id: " + id));
 
         plan.setActive(!plan.isActive());
+        plan.setUpdatedAt(LocalDateTime.now());
         MembershipPlan updatedPlan = membershipPlanRepository.save(plan);
 
-        log.info("Toggled membership plan {} status to: {}", plan.getName(), plan.isActive());
         return ResponseEntity.ok(ApiResponse.success("Membership plan status updated successfully", updatedPlan));
     }
 }

@@ -819,8 +819,7 @@ public class ProductController {
             @PathVariable Long id,
             @AuthenticationPrincipal UserDetails userDetails) {
         try {
-            User user = userService.findByUsername(userDetails.getUsername());
-            membershipService.boostProduct(user, id);
+            membershipService.boostProduct(userDetails, id);
             return ResponseEntity.ok(ApiResponse.success("Product boosted successfully", null));
         } catch (Exception e) {
             return ResponseEntity.status(HttpStatus.BAD_REQUEST)

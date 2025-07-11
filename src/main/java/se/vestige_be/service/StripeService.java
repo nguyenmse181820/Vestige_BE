@@ -666,8 +666,8 @@ public class StripeService {
         try {
             SessionCreateParams params = SessionCreateParams.builder()
                     .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
-                    .setSuccessUrl("https://your-domain.com/success?session_id={CHECKOUT_SESSION_ID}")
-                    .setCancelUrl("https://your-domain.com/cancel")
+                    .setSuccessUrl("http://localhost:5173/subscribe/success?session_id={CHECKOUT_SESSION_ID}")
+                    .setCancelUrl("http://localhost:5173/subscribe/cancel")
                     .setCustomerEmail(user.getEmail())
                     .addLineItem(
                             SessionCreateParams.LineItem.builder()

@@ -2,9 +2,12 @@ package se.vestige_be.pojo;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.hibernate.annotations.CreationTimestamp;
+import org.hibernate.annotations.UpdateTimestamp;
 import se.vestige_be.pojo.enums.TrustTier;
 
 import java.math.BigDecimal;
+import java.time.LocalDateTime;
 
 @Entity
 @Table(name = "membership_plans")
@@ -41,8 +44,14 @@ public class MembershipPlan {
     @Column(name = "required_trust_tier")
     private TrustTier requiredTrustTier;
 
-    @ManyToOne(fetch = FetchType.LAZY)
+    @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "tier_id")
     @ToString.Exclude
     private FeeTier feeTier;
+
+    @CreationTimestamp
+    private LocalDateTime createdAt;
+
+    @UpdateTimestamp
+    private LocalDateTime updatedAt;
 }
