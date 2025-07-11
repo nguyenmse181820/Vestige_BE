@@ -8,7 +8,6 @@ import java.util.Optional;
 
 public interface UserMembershipRepository extends JpaRepository<UserMembership, Long> {
     Optional<UserMembership> findByUserAndStatus(User user, MembershipStatus status);
-    Optional<UserMembership> findByStripeSubscriptionId(String stripeSubscriptionId);
-
+    Optional<UserMembership> findByPayosSubscriptionId(String payosSubscriptionId);
     Optional<UserMembership> findFirstByUserAndPlanPlanIdAndStatusOrderByCreatedAtDesc(User user, Long planId, MembershipStatus membershipStatus);
 }

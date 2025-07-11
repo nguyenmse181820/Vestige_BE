@@ -36,16 +36,14 @@ public class StripeService {
 
     private final OrderService orderService;
     private final UserService userService;
-    private final MembershipService membershipService;
     
     // Simple in-memory storage for processed webhook events
     // In production, this should be stored in database
     private final Set<String> processedEventIds = ConcurrentHashMap.newKeySet();
 
-    public StripeService(@Lazy OrderService orderService, @Lazy UserService userService, @Lazy MembershipService membershipService) {
+    public StripeService(@Lazy OrderService orderService, @Lazy UserService userService) {
         this.orderService = orderService;
         this.userService = userService;
-        this.membershipService = membershipService;
     }
 
     @PostConstruct
@@ -485,18 +483,6 @@ public class StripeService {
                                 payout.getId(), payout.getAmount(), payout.getCurrency().toUpperCase(), payout.getDestination());
                     }
                     break;
-                case "checkout.session.completed":
-                    if (stripeObject instanceof Session session) {
-                        handleCheckoutSessionCompleted(session);
-                    }
-                    break;
-
-                // Subscription webhook events
-                case "invoice.payment_succeeded":
-                case "customer.subscription.deleted":
-                case "customer.subscription.created":
-                    processSubscriptionWebhook(event);
-                    break;
 
                 default:
                     log.debug("Unhandled webhook event: {} - Event ID: {}", event.getType(), eventId);
@@ -591,23 +577,6 @@ public class StripeService {
         }
     }
 
-    private void handleCheckoutSessionCompleted(Session session) {
-        String clientReferenceId = session.getClientReferenceId();
-        String subscriptionId = session.getSubscription();
-        Map<String, String> metadata = session.getMetadata();
-        Long userId = Long.parseLong(metadata.get("user_id"));
-        Long planId = Long.parseLong(metadata.get("plan_id"));
-
-        if ("subscription".equals(session.getMode())) {
-            if (subscriptionId != null && userId != null && planId != null) {
-                log.info("Activating subscription for user {} and plan {}", userId, planId);
-                membershipService.activateSubscription(subscriptionId, userId, planId);
-            } else {
-                log.error("Missing data in checkout session for subscription activation. Session ID: {}", session.getId());
-            }
-        }
-    }
-
     /**
      * Determines the appropriate capabilities for a Stripe account based on country
      * Vietnam: Only supports transfers
@@ -690,117 +659,6 @@ public class StripeService {
             log.error("Failed to transfer funds to seller account {}: {} (transaction {})",
                     destinationAccountId, e.getMessage(), transactionId);
             throw e;
-        }
-    }
-
-    /**
-     * Create a Stripe Checkout Session for subscription
-     */
-    public String createSubscriptionCheckoutSession(User user, MembershipPlan plan) {
-        try {
-            SessionCreateParams params = SessionCreateParams.builder()
-                    .setMode(SessionCreateParams.Mode.SUBSCRIPTION)
-                    .setSuccessUrl("http://localhost:5173/subscribe/success?session_id={CHECKOUT_SESSION_ID}")
-                    .setCancelUrl("http://localhost:5173/subscribe/cancel")
-                    .setCustomerEmail(user.getEmail())
-                    .addLineItem(
-                            SessionCreateParams.LineItem.builder()
-                                    .setPrice(plan.getStripePriceId())
-                                    .setQuantity(1L)
-                                    .build()
-                    )
-                    .putMetadata("user_id", user.getUserId().toString())
-                    .putMetadata("plan_id", plan.getPlanId().toString())
-                    .build();
-
-            Session session = Session.create(params);
-            log.info("Created subscription checkout session {} for user {} and plan {}", 
-                    session.getId(), user.getUsername(), plan.getName());
-            
-            return session.getUrl();
-        } catch (StripeException e) {
-            log.error("Failed to create subscription checkout session for user {}: {}", 
-                    user.getUsername(), e.getMessage());
-            throw new BusinessLogicException("Failed to create subscription checkout session: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Cancel a Stripe subscription
-     */
-    public void cancelSubscription(String stripeSubscriptionId) {
-        try {
-            Subscription subscription = Subscription.retrieve(stripeSubscriptionId);
-            subscription.cancel();
-            log.info("Cancelled subscription {}", stripeSubscriptionId);
-        } catch (StripeException e) {
-            log.error("Failed to cancel subscription {}: {}", stripeSubscriptionId, e.getMessage());
-            throw new BusinessLogicException("Failed to cancel subscription: " + e.getMessage());
-        }
-    }
-
-    /**
-     * Process Stripe webhook events for subscriptions
-     */
-    public void processSubscriptionWebhook(Event event) {
-        try {
-            switch (event.getType()) {
-                case "invoice.payment_succeeded":
-                    handleInvoicePaymentSucceeded(event);
-                    break;
-                case "customer.subscription.deleted":
-                    handleSubscriptionDeleted(event);
-                    break;
-                case "customer.subscription.created":
-                    handleSubscriptionCreated(event);
-                    break;
-                default:
-                    log.info("Unhandled subscription event type: {}", event.getType());
-            }
-        } catch (Exception e) {
-            log.error("Error processing subscription webhook event {}: {}", event.getType(), e.getMessage());
-            throw new BusinessLogicException("Failed to process webhook event: " + e.getMessage());
-        }
-    }
-
-    private void handleInvoicePaymentSucceeded(Event event) {
-        try {
-            StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
-            if (stripeObject instanceof Invoice invoice) {
-                String subscriptionId = invoice.getSubscription();
-                if (subscriptionId != null) {
-                    log.info("Processing invoice payment succeeded for subscription: {}", subscriptionId);
-                    membershipService.renewMembership(subscriptionId);
-                }
-            }
-        } catch (Exception e) {
-            log.error("Error handling invoice payment succeeded: {}", e.getMessage());
-        }
-    }
-
-    private void handleSubscriptionDeleted(Event event) {
-        try {
-            StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
-            if (stripeObject instanceof Subscription subscription) {
-                log.info("Processing subscription deleted for subscription: {}", subscription.getId());
-                membershipService.deactivateSubscription(subscription.getId());
-            }
-        } catch (Exception e) {
-            log.error("Error handling subscription deleted: {}", e.getMessage());
-        }
-    }
-
-    private void handleSubscriptionCreated(Event event) {
-        try {
-            StripeObject stripeObject = event.getDataObjectDeserializer().getObject().orElse(null);
-            if (stripeObject instanceof Subscription subscription) {
-                log.info("Processing subscription created for subscription: {}", subscription.getId());
-                // Find the plan from subscription metadata or price ID
-                // This would typically be handled via the checkout completion rather than subscription creation
-                log.info("Subscription created: {}, status: {}", subscription.getId(), subscription.getStatus());
-            }
-        } catch (Exception e) {
-            log.error("Error handling subscription created: {}", e.getMessage());
         }
     }
 }

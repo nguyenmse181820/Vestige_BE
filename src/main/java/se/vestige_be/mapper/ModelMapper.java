@@ -45,7 +45,7 @@ public class ModelMapper {
         dto.setStatus(membership.getStatus());
         dto.setStartDate(membership.getStartDate());
         dto.setEndDate(membership.getEndDate());
-        dto.setStripeSubscriptionId(membership.getStripeSubscriptionId());
+        dto.setPayosSubscriptionId(membership.getPayosSubscriptionId());
         return dto;
     }
 }

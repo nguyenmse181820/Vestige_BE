@@ -40,9 +40,8 @@ public class UserMembership {
     @Builder.Default
     private MembershipStatus status = MembershipStatus.ACTIVE;
 
-    // New fields for Stripe integration and boost tracking
-    @Column(name = "stripe_subscription_id", unique = true)
-    private String stripeSubscriptionId;
+    @Column(name = "payos_subscription_id", unique = true)
+    private String payosSubscriptionId;
 
     @Column(name = "boosts_remaining")
     private Integer boostsRemaining;

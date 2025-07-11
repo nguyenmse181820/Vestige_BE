@@ -50,7 +50,7 @@ public class AdminMembershipController {
                 .description(request.getDescription())
                 .price(request.getPrice())
                 .boostsPerMonth(request.getBoostsPerMonth())
-                .stripePriceId(request.getStripePriceId())
+                .payosPriceId(request.getPayosPriceId())
                 .requiredTrustTier(request.getRequiredTrustTier())
                 .feeTier(feeTier)
                 .isActive(request.isActive())
@@ -73,7 +73,7 @@ public class AdminMembershipController {
         existingPlan.setDescription(request.getDescription());
         existingPlan.setPrice(request.getPrice());
         existingPlan.setBoostsPerMonth(request.getBoostsPerMonth());
-        existingPlan.setStripePriceId(request.getStripePriceId());
+        existingPlan.setPayosPriceId(request.getPayosPriceId());
         existingPlan.setRequiredTrustTier(request.getRequiredTrustTier());
         existingPlan.setFeeTier(feeTier);
         existingPlan.setActive(request.isActive());

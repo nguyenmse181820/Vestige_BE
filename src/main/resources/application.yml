@@ -41,6 +41,12 @@ stripe:
   webhook:
     secret: ${STRIPE_WEBHOOK_SECRET}
 
+# PayOS Configuration
+payos:
+  client-id: ${PAYOS_CLIENT_ID}
+  api-key: ${PAYOS_API_KEY}
+  checksum-key: ${PAYOS_CHECKSUM_KEY}
+
 # JWT Configuration
 jwt:
   secret: ${JWT_SECRET}
@@ -113,6 +119,12 @@ stripe:
   webhook:
     secret: ${STRIPE_WEBHOOK_SECRET}
   currency: vnd
+
+# PayOS Configuration for local development
+payos:
+  client-id: ${PAYOS_CLIENT_ID}
+  api-key: ${PAYOS_API_KEY}
+  checksum-key: ${PAYOS_CHECKSUM_KEY}
 
 ---
 # Production Profile

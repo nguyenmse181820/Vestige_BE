@@ -37,8 +37,8 @@ public class MembershipPlan {
     @Column(name = "boosts_per_month", nullable = false)
     private Integer boostsPerMonth;
 
-    @Column(name = "stripe_price_id", unique = true)
-    private String stripePriceId;
+    @Column(name = "payos_price_id", unique = true)
+    private String payosPriceId;
 
     @Enumerated(EnumType.STRING)
     @Column(name = "required_trust_tier")

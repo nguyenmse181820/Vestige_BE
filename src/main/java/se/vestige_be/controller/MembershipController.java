@@ -57,27 +57,10 @@ public class MembershipController {
         try {
             log.info("User {} is subscribing to plan {}", currentUser.getUsername(), planId);
             String checkoutUrl = membershipService.subscribe(currentUser, planId);
-            return ResponseEntity.ok(ApiResponse.success("Successfully subscribed to plan.", checkoutUrl));
+            return ResponseEntity.ok(ApiResponse.success("Successfully created subscription payment link.", checkoutUrl));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to create subscription: " + e.getMessage()));
-        }
-    }
-
-    @PostMapping("/confirm-subscription")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<UserMembershipDTO>> confirmSubscription(
-            @RequestParam("session_id") String sessionId,
-            @AuthenticationPrincipal UserDetails currentUser) {
-        if (currentUser == null) {
-            return new ResponseEntity<>(ApiResponse.error("Unauthorized: User must be authenticated."), HttpStatus.UNAUTHORIZED);
-        }
-        try {
-            UserMembershipDTO membership = membershipService.confirmSubscription(sessionId, currentUser);
-            return ResponseEntity.ok(ApiResponse.success("Subscription confirmed and activated successfully.", membership));
-        } catch (Exception e) {
-            return ResponseEntity.badRequest()
-                    .body(ApiResponse.error("Failed to confirm subscription: " + e.getMessage()));
         }
     }
 
@@ -88,7 +71,7 @@ public class MembershipController {
         }
         try {
             membershipService.cancelSubscription(currentUser);
-            return ResponseEntity.ok(ApiResponse.success("Subscription cancellation requested successfully. It will be deactivated at the end of the current billing period.", null));
+            return ResponseEntity.ok(ApiResponse.success("Subscription cancelled successfully.", null));
         } catch (Exception e) {
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to cancel subscription: " + e.getMessage()));

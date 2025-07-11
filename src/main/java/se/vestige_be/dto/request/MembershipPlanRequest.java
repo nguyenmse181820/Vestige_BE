@@ -24,8 +24,8 @@ public class MembershipPlanRequest {
     @Positive(message = "Boosts per month must be positive")
     private Integer boostsPerMonth;
 
-    @NotBlank(message = "Stripe Price ID cannot be blank")
-    private String stripePriceId;
+    @NotBlank(message = "PayOS Price ID cannot be blank")
+    private String payosPriceId;
 
     private TrustTier requiredTrustTier;
 
