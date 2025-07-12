@@ -37,6 +37,7 @@ public class UserController {
 
     @GetMapping
     @PreAuthorize("hasRole('USER')")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse<PagedResponse<UserListResponse>>> getAllUsers(
             @RequestParam(defaultValue = "0") int page,
             @RequestParam(defaultValue = "20") int size,
@@ -69,6 +70,7 @@ public class UserController {
 
     @GetMapping("/profile")
     @PreAuthorize("hasRole('USER')")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse<UserProfileResponse>> getUserProfile(
             @AuthenticationPrincipal UserDetails userDetails) {
 
@@ -111,6 +113,7 @@ public class UserController {
 
     @PatchMapping("/profile")
     @PreAuthorize("hasRole('USER')")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse<UserProfileResponse>> updateProfile(
             @Valid @RequestBody UpdateProfileRequest request,
             @AuthenticationPrincipal UserDetails userDetails) {

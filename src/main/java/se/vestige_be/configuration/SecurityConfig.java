@@ -57,8 +57,6 @@ public class SecurityConfig {
                                 "/api/stripe/webhook",
                                 "/api/payos/webhook",
                                 "/api/v1/payos/payment-callback",
-                                "/api/products/**",
-                                "/api/users/{id}",
                                 "/ws/**", "/chat/**",
                                 "/css/**", "/js/**", "/static/**",
                                 "/swagger-ui.html", "/swagger-ui/**",
@@ -66,6 +64,14 @@ public class SecurityConfig {
                                 "/actuator/**"
                         ).permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/brands/**").permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/users/{id:[0-9]+}").permitAll()  // Only numeric IDs
+                        .requestMatchers(HttpMethod.GET, 
+                                "/api/products",
+                                "/api/products/{id:[0-9]+}",
+                                "/api/products/slug/{slug}",
+                                "/api/products/slug-available/{slug}",
+                                "/api/products/top-viewed"
+                        ).permitAll()  // Public product endpoints
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session
