@@ -58,7 +58,7 @@ public class SecurityConfig {
                         // Auth endpoints
                         .requestMatchers("/api/auth/**").permitAll()
                         .requestMatchers("/api/stripe/webhook").permitAll()
-                        // Public API endpoints (can be accessed without authentication)
+                        .requestMatchers("/api/payos/webhook").permitAll()
                         .requestMatchers("/api/products/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/brands/**").permitAll()

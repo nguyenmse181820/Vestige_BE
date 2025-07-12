@@ -46,7 +46,7 @@ public class MembershipController {
                 .orElseGet(() -> ResponseEntity.ok(ApiResponse.success("No active membership found.", null)));
     }
 
-    @PostMapping("/subscribe/{planId}")
+    @PostMapping("/subscription/{planId}")
     @PreAuthorize("hasRole('USER')")
     public ResponseEntity<ApiResponse<String>> subscribe(@PathVariable Long planId,
                                                          @AuthenticationPrincipal UserDetails currentUser) {

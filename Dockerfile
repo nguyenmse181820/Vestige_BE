@@ -1,30 +1,24 @@
-# Multi-stage build for Spring Boot application
-FROM maven:3.9-eclipse-temurin-21 AS build
+# Use an official OpenJDK runtime as a parent image
+FROM openjdk:21-jdk-slim
 
+# Set the working directory in the container
 WORKDIR /app
 
-COPY pom.xml .
-RUN mvn dependency:go-offline -B
+# Copy the Maven wrapper and the pom.xml file
+COPY .mvn/ .mvn
+COPY mvnw pom.xml ./
 
+# Download the dependencies
+RUN ./mvnw dependency:go-offline
+
+# Copy the rest of the application's source code
 COPY src ./src
-RUN mvn clean package -DskipTests
 
-FROM eclipse-temurin:21-jdk
+# Package the application
+RUN ./mvnw package -DskipTests
 
-WORKDIR /app
-
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-RUN groupadd -r spring && useradd -r -g spring spring
-
-COPY --from=build /app/target/*.jar app.jar
-
-RUN chown -R spring:spring /app
-USER spring
-
+# Expose the port the app runs on
 EXPOSE 8080
 
-HEALTHCHECK --interval=30s --timeout=3s --start-period=5s --retries=3 \
-  CMD curl -f http://localhost:8080/actuator/health || exit 1
-
-ENTRYPOINT ["java", "-jar", "app.jar"]
+# Run the JAR file
+ENTRYPOINT ["java","-jar","target/Vestige_BE-0.0.1-SNAPSHOT.jar"]

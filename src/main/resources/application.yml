@@ -57,6 +57,8 @@ jwt:
 app:
   frontend:
     url: ${FRONTEND_URL:http://localhost:3000}
+  base:
+    url: ${BASE_URL:http://localhost:8080}
   cookie:
     secure: ${COOKIE_SECURE:false}  # Set to true in production with HTTPS
     same-site: ${COOKIE_SAME_SITE:STRICT}

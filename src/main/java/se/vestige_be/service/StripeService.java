@@ -464,7 +464,7 @@ public class StripeService {
                     }
                     break;
 
-                case "transfer.failed":
+                case "v2.money_management.outbound_transfer.failed":
                     if (stripeObject instanceof Transfer transfer) {
                         orderService.handleTransferFailed(transfer);
                     }

@@ -13,6 +13,7 @@ import vn.payos.PayOS;
 import vn.payos.type.CheckoutResponseData;
 import vn.payos.type.ItemData;
 import vn.payos.type.PaymentData;
+import vn.payos.type.PaymentLinkData;
 
 import javax.crypto.Mac;
 import javax.crypto.spec.SecretKeySpec;
@@ -41,10 +42,14 @@ public class PayOsService {
     @Value("${app.frontend.url:http://localhost:3000}")
     private String frontendUrl;
 
+    @Value("${app.base.url:http://localhost:8080}")
+    private String baseUrl;
+
     private final Gson gson = new Gson();
 
     /**
      * Creates a payment link for subscription using PayOS
+     * Uses Return URL method for secure payment confirmation
      */
     public CreatePaymentLinkResult createPaymentLink(User user, MembershipPlan plan) {
         try {
@@ -65,8 +70,8 @@ public class PayOsService {
                     .amount(plan.getPrice().intValue())
                     .description(description)
                     .items(Arrays.asList(item))
-                    .cancelUrl(frontendUrl + "/subscribe/cancel")
-                    .returnUrl(frontendUrl + "/subscribe/success")
+                    .cancelUrl(baseUrl + "/api/v1/payos/payment-callback")
+                    .returnUrl(baseUrl + "/api/v1/payos/payment-callback")
                     .build();
 
             // Create payment link
@@ -144,6 +149,33 @@ public class PayOsService {
         } catch (Exception e) {
             log.error("Failed to parse PayOS webhook data: {}", e.getMessage());
             throw new BusinessLogicException("Failed to parse webhook data: " + e.getMessage());
+        }
+    }
+
+    /**
+     * Verifies the actual status of a payment link with PayOS server.
+     * This is crucial for security - we cannot trust the status from URL parameters alone.
+     * @param orderCode The order code to verify
+     * @return true if the transaction status is PAID, false otherwise.
+     */
+    public boolean verifyPaymentStatus(long orderCode) {
+        try {
+            PayOS payOS = new PayOS(clientId, apiKey, checksumKey);
+            // Get payment information from PayOS
+            PaymentLinkData paymentInfo = payOS.getPaymentLinkInformation(orderCode);
+            
+            if (paymentInfo != null && "PAID".equals(paymentInfo.getStatus())) {
+                log.info("Server-side verification PASSED for orderCode {}. Status is PAID.", orderCode);
+                return true;
+            }
+            
+            log.warn("Server-side verification FAILED for orderCode {}. Status is {}.", 
+                    orderCode, paymentInfo != null ? paymentInfo.getStatus() : "NOT_FOUND");
+            return false;
+            
+        } catch (Exception e) {
+            log.error("Error during server-side payment verification for orderCode {}: {}", orderCode, e.getMessage());
+            return false;
         }
     }
 
