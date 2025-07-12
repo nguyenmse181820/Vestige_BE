@@ -49,49 +49,26 @@ public class SecurityConfig {
     @Bean
     public SecurityFilterChain securityFilterChain(HttpSecurity http) throws Exception {
         http
-                // Enable CORS
                 .cors(cors -> cors.configurationSource(corsConfigurationSource))
-                // Disable CSRF
-                .csrf(csrf -> csrf.disable())
                 .csrf(AbstractHttpConfigurer::disable)
                 .authorizeHttpRequests(auth -> auth
-                        // Auth endpoints
-                        .requestMatchers("/api/auth/**").permitAll()
-                        .requestMatchers("/api/stripe/webhook").permitAll()
-                        .requestMatchers("/api/payos/webhook").permitAll()
-                        .requestMatchers("/api/products/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/categories/**").permitAll()
-                        .requestMatchers(HttpMethod.GET, "/api/brands/**").permitAll()
-                        .requestMatchers("/api/users/{id}").permitAll() // Public user profiles
+                        .requestMatchers(
+                                "/api/auth/**",
+                                "/api/stripe/webhook",
+                                "/api/payos/webhook",
+                                "/api/v1/payos/payment-callback",
 
-                        // Protected endpoints (require authentication)
-                        .requestMatchers("/api/users/profile/**").authenticated()
-                        .requestMatchers("/api/users/addresses/**").authenticated()
-                        .requestMatchers("/api/orders/**").authenticated()
-                        .requestMatchers("/api/offers/**").authenticated()
-                        .requestMatchers("/api/transactions/**").authenticated()
+                                // Public API for viewing products, etc.
+                                "/api/products/**",
+                                "/api/users/{id}",
+                                "/ws/**", "/chat/**",
 
-                        // WebSocket endpoints - Allow for initial connection
-                        .requestMatchers("/chat/**").permitAll()
-                        .requestMatchers("/ws/**").permitAll()
-
-                        // Swagger UI and API docs
-                        .requestMatchers("/swagger-ui.html").permitAll()
-                        .requestMatchers("/swagger-ui/**").permitAll()
-                        .requestMatchers("/v3/api-docs/**").permitAll()
-                        .requestMatchers("/swagger-resources/**").permitAll()
-                        .requestMatchers("/webjars/**").permitAll()
-
-                        // Actuator endpoints (for health check)
-                        .requestMatchers("/actuator/**").permitAll()
-
-                        // Static resources
-                        .requestMatchers("/css/**", "/js/**", "/static/**").permitAll()
-
-                        // Chat API endpoints require authentication
-                        .requestMatchers("/api/chat/**").authenticated()
-
-                        // Require authentication for all other requests
+                                "/css/**", "/js/**", "/static/**",
+                                "/swagger-ui.html", "/swagger-ui/**",
+                                "/v3/api-docs/**",
+                                "/actuator/**"
+                        ).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/brands/**").permitAll()
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session

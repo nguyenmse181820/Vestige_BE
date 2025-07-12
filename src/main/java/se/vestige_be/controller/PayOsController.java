@@ -15,7 +15,7 @@ import jakarta.servlet.http.HttpServletResponse;
 import java.io.IOException;
 
 @RestController
-@RequestMapping("/api/payos")
+@RequestMapping("/api/v1/payos")
 @RequiredArgsConstructor
 @Slf4j
 public class PayOsController {
@@ -122,42 +122,22 @@ public class PayOsController {
         String successUrl = frontendUrl + "/payment/success";
         String failureUrl = frontendUrl + "/payment/failure";
 
-        log.info("Payment callback received: code={}, status={}, orderCode={}", code, status, orderCodeStr);
-
-        // Step 1: Quick check of the status from the URL. If not "PAID", redirect to failure page immediately.
         if (!"PAID".equals(status) || !"00".equals(code)) {
-            log.warn("Payment callback received with non-paid status for orderCode: {}. Status: {}, Code: {}", 
-                    orderCodeStr, status, code);
             httpServletResponse.sendRedirect(failureUrl);
             return;
         }
 
         try {
             long orderCode = Long.parseLong(orderCodeStr);
-
-            // Step 2: Verify the transaction status with the PayOS server (MOST IMPORTANT FOR SECURITY)
             boolean isPaymentVerified = payOsService.verifyPaymentStatus(orderCode);
-
             if (isPaymentVerified) {
-                // Step 3: If verification is successful, execute the business logic
-                log.info("Processing successful payment for order code: {}", orderCode);
-                
                 try {
                     membershipService.activateSubscription(String.valueOf(orderCode));
-                    log.info("Successfully activated subscription for order code: {}", orderCode);
-                    
-                    // Redirect the user to the success page
                     httpServletResponse.sendRedirect(successUrl);
-                    
                 } catch (Exception e) {
-                    log.error("Failed to activate subscription for order code {}: {}", orderCode, e.getMessage());
-                    // Even if activation fails, we verified payment - redirect to success but log the issue
                     httpServletResponse.sendRedirect(successUrl);
                 }
-                
             } else {
-                // If verification fails, treat the transaction as invalid
-                log.error("Server-side verification failed for a PAID status callback. OrderCode: {}", orderCode);
                 httpServletResponse.sendRedirect(failureUrl);
             }
 

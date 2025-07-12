@@ -44,7 +44,9 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     // Find order items by seller and escrow status
     List<OrderItem> findBySellerUserIdAndEscrowStatus(Long sellerId, EscrowStatus escrowStatus);
     Long countBySellerUserIdAndStatus(Long sellerId, OrderItemStatus status);
-    Long countBySellerUserIdAndEscrowStatus(Long sellerId, EscrowStatus escrowStatus);    List<OrderItem> findByOrderBuyerUserIdAndStatus(Long buyerId, OrderItemStatus status);
+    Long countBySellerUserIdAndEscrowStatus(Long sellerId, EscrowStatus escrowStatus);
+    
+    List<OrderItem> findByOrderBuyerUserIdAndStatus(Long buyerId, OrderItemStatus status);
 
     List<OrderItem> findByOrderBuyerUserIdAndEscrowStatus(Long buyerId, EscrowStatus escrowStatus);
     Long countByOrderBuyerUserIdAndStatus(Long buyerId, OrderItemStatus status);

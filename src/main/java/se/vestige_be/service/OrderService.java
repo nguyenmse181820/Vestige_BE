@@ -1205,19 +1205,24 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
     }
 
     private Page<Order> getSellerOrders(Long userId, String status, Pageable pageable) {
-        Pageable adjustedPageable = adjustPageableForSellerOrders(pageable);
+        // Remove sort from pageable since our queries have hardcoded ORDER BY clauses
+        // This prevents conflicts between custom ORDER BY and Pageable sort
+        Pageable unsortedPageable = PageRequest.of(
+                pageable.getPageNumber(), 
+                pageable.getPageSize() * 3 // Increase size to account for filtering
+        );
 
         Page<OrderItem> sellerItems;
         if (status != null && !status.trim().isEmpty()) {
             try {
                 OrderItemStatus itemStatus = OrderItemStatus.valueOf(status.toUpperCase());
-                sellerItems = orderItemRepository.findBySellerUserIdAndStatusOrderByOrderCreatedAtDesc(userId, itemStatus, adjustedPageable);
+                sellerItems = orderItemRepository.findBySellerUserIdAndStatusOrderByOrderCreatedAtDesc(userId, itemStatus, unsortedPageable);
             } catch (IllegalArgumentException e) {
                 log.warn("Invalid OrderItemStatus: {}. Returning all items", status);
-                sellerItems = orderItemRepository.findBySellerUserIdOrderByOrderCreatedAtDesc(userId, adjustedPageable);
+                sellerItems = orderItemRepository.findBySellerUserIdOrderByOrderCreatedAtDesc(userId, unsortedPageable);
             }
         } else {
-            sellerItems = orderItemRepository.findBySellerUserIdOrderByOrderCreatedAtDesc(userId, adjustedPageable);
+            sellerItems = orderItemRepository.findBySellerUserIdOrderByOrderCreatedAtDesc(userId, unsortedPageable);
         }
 
         List<Order> uniqueOrders = sellerItems.getContent().stream()
@@ -1695,26 +1700,8 @@ public void forceReleaseEscrow(Long transactionId, String notes, Long adminId) {
         log.error("Admin escrow release failed for transaction {}: {}", transactionId, e.getMessage());
         throw new BusinessLogicException("Escrow release failed: " + e.getMessage());
     }
-}
-
-/**
- * Adjust pageable for seller orders to handle potential multiplicity issues
- * We fetch more items to account for filtering them by order
- */
-private Pageable adjustPageableForSellerOrders(Pageable pageable) {
-    // Increase page size to account for filtering, but keep original page number
-    int adjustedSize = pageable.getPageSize() * 3; // Fetch more items to account for grouping
-
-    // Create new pageable with same sort but larger page size
-    return PageRequest.of(
-            pageable.getPageNumber(),
-            adjustedSize,
-            pageable.getSort()
-    );
-}
-
-/**
- * Load product images separately to avoid MultipleBagFetchException
+}    /**
+     * Load product images separately to avoid MultipleBagFetchException
  * Spring Data JPA cannot fetch multiple collection relationships in a single query
  */
 private void loadProductImagesForOrders(List<Order> orders) {

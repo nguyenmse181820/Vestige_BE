@@ -143,16 +143,28 @@ public class MembershipService {
      */
     @Transactional
     public void activateSubscription(String orderCode) {
-        // Find the pending membership by order code (temporarily stored in payosSubscriptionId)
-        UserMembership membership = userMembershipRepository.findByPayosSubscriptionId(orderCode)
-                .orElseThrow(() -> {
-                    log.error("Could not find PENDING membership for order code: {}", orderCode);
-                    return new BusinessLogicException("Pending membership not found for order code: " + orderCode);
-                });
+        Optional<UserMembership> membershipOpt = userMembershipRepository.findByPayosSubscriptionId(orderCode);
+        
+        if (membershipOpt.isEmpty()) {
+            log.error("Could not find PENDING membership for order code: {}. Checking all memberships...", orderCode);
+            
+            // Debug: List all pending memberships
+            List<UserMembership> allPendingMemberships = userMembershipRepository.findAll().stream()
+                    .filter(m -> m.getStatus() == MembershipStatus.PENDING)
+                    .toList();
+
+            log.info("Found {} pending memberships:", allPendingMemberships.size());
+            allPendingMemberships.forEach(m ->
+                log.info("  - ID: {}, User: {}, OrderCode: {}, Status: {}",
+                        m.getMembershipId(), m.getUser().getUsername(),
+                        m.getPayosSubscriptionId(), m.getStatus()));
+            
+            throw new BusinessLogicException("Pending membership not found for order code: " + orderCode);
+        }
+        
+        UserMembership membership = membershipOpt.get();
 
         if (membership.getStatus() != MembershipStatus.PENDING) {
-            log.warn("Attempting to activate membership that is not in PENDING status: {} for order code: {}", 
-                    membership.getStatus(), orderCode);
             return;
         }
 
@@ -180,9 +192,6 @@ public class MembershipService {
                 .build();
 
         transactionRepository.save(transaction);
-
-        log.info("Successfully activated membership for user {} with plan {} and order code: {}", 
-                user.getUsername(), plan.getName(), orderCode);
     }
 
     /**
@@ -198,8 +207,6 @@ public class MembershipService {
             membership.setStatus(MembershipStatus.CANCELLED);
             membership.setEndDate(LocalDateTime.now());
             userMembershipRepository.save(membership);
-            
-            log.info("Marked membership as cancelled for failed payment with order code: {}", orderCode);
         } else {
             log.warn("No membership found for failed payment with order code: {}", orderCode);
         }
