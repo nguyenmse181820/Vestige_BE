@@ -57,12 +57,9 @@ public class SecurityConfig {
                                 "/api/stripe/webhook",
                                 "/api/payos/webhook",
                                 "/api/v1/payos/payment-callback",
-
-                                // Public API for viewing products, etc.
                                 "/api/products/**",
                                 "/api/users/{id}",
                                 "/ws/**", "/chat/**",
-
                                 "/css/**", "/js/**", "/static/**",
                                 "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs/**",
