@@ -60,9 +60,9 @@ app:
   base:
     url: ${BASE_URL:http://localhost:8080}
   cookie:
-    secure: ${COOKIE_SECURE:false}  # Set to true in production with HTTPS
-    same-site: ${COOKIE_SAME_SITE:STRICT}
-    domain: ${COOKIE_DOMAIN:}  # Set your domain in production
+    secure: ${COOKIE_SECURE:true}
+    same-site: ${COOKIE_SAME_SITE:NONE}
+    domain: ${COOKIE_DOMAIN:vestigehouse.click}
 
 # CORS Configuration
 cors:

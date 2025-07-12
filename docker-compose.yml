@@ -1,8 +1,70 @@
+#services:
+#  # PostgreSQL Database
+#  postgres:
+#    image: postgres:15-alpine
+#    container_name: vestige-postgres
+#    environment:
+#      - POSTGRES_DB=vestige_db
+#      - POSTGRES_USER=${DATABASE_USERNAME:-postgres}
+#      - POSTGRES_PASSWORD=${DATABASE_PASSWORD:-12345}
+#    ports:
+#      - "5432:5432"
+#    volumes:
+#      - postgres_data:/var/lib/postgresql/data
+#    healthcheck:
+#      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME:-postgres}"]
+#      interval: 10s
+#      timeout: 5s
+#      retries: 5
+#    restart: unless-stopped
+#    networks:
+#      - vestige-network
+#
+#  # Vestige Backend Application
+#  vestige-backend:
+#    build:
+#      context: .
+#      dockerfile: Dockerfile
+#    container_name: vestige-backend
+#    environment:
+#      - DATABASE_URL=${DATABASE_URL:-jdbc:postgresql://postgres:5432/vestige_db}
+#      - DATABASE_USERNAME=${DATABASE_USERNAME:-postgres}
+#      - DATABASE_PASSWORD=${DATABASE_PASSWORD:-12345}
+#      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
+#      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
+#      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
+#      - JWT_SECRET=${JWT_SECRET:-demo_jwt_secret_key_for_testing_only_2024}
+#      - JWT_EXPIRATION=${JWT_EXPIRATION:-3600000}
+#      - JWT_REFRESH_EXPIRATION=${JWT_REFRESH_EXPIRATION:-86400000}
+#      - APP_FRONTEND_URL=${APP_FRONTEND_URL:-http://localhost:3000}
+#      - SPRING_PROFILES_ACTIVE=docker
+#    ports:
+#      - "8080:8080"
+#    depends_on:
+#      postgres:
+#        condition: service_healthy
+#    healthcheck:
+#      test: ["CMD", "curl", "-f", "http://localhost:8080/actuator/health"]
+#      interval: 30s
+#      timeout: 10s
+#      retries: 3
+#      start_period: 60s
+#    restart: unless-stopped
+#    networks:
+#      - vestige-network
+#
+#volumes:
+#  postgres_data:
+#
+#networks:
+#  vestige-network:
+#    driver: bridge
 services:
-  # PostgreSQL Database
   postgres:
     image: postgres:15-alpine
     container_name: vestige-postgres
+    env_file:
+      - .env
     environment:
       - POSTGRES_DB=vestige_db
       - POSTGRES_USER=${DATABASE_USERNAME:-postgres}
@@ -12,7 +74,7 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${DATABASE_USERNAME:-postgres}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-postgres}"]
       interval: 10s
       timeout: 5s
       retries: 5
@@ -26,18 +88,18 @@ services:
       context: .
       dockerfile: Dockerfile
     container_name: vestige-backend
+    env_file:
+      - .env
     environment:
       - DATABASE_URL=${DATABASE_URL:-jdbc:postgresql://postgres:5432/vestige_db}
       - DATABASE_USERNAME=${DATABASE_USERNAME:-postgres}
       - DATABASE_PASSWORD=${DATABASE_PASSWORD:-12345}
-      - STRIPE_SECRET_KEY=${STRIPE_SECRET_KEY}
-      - STRIPE_PUBLISHABLE_KEY=${STRIPE_PUBLISHABLE_KEY}
-      - STRIPE_WEBHOOK_SECRET=${STRIPE_WEBHOOK_SECRET}
       - JWT_SECRET=${JWT_SECRET:-demo_jwt_secret_key_for_testing_only_2024}
-      - JWT_EXPIRATION=${JWT_EXPIRATION:-3600000}
-      - JWT_REFRESH_EXPIRATION=${JWT_REFRESH_EXPIRATION:-86400000}
       - APP_FRONTEND_URL=${APP_FRONTEND_URL:-http://localhost:3000}
-      - SPRING_PROFILES_ACTIVE=docker
+      - SPRING_PROFILES_ACTIVE=default
+      - PAYOS_CLIENT_ID=${PAYOS_CLIENT_ID}
+      - PAYOS_API_KEY=${PAYOS_API_KEY}
+      - PAYOS_CHECKSUM_KEY=${PAYOS_CHECKSUM_KEY}
     ports:
       - "8080:8080"
     depends_on:
