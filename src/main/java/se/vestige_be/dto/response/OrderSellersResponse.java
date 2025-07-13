@@ -25,7 +25,7 @@ public class OrderSellersResponse {
         private Long sellerId;
         private String sellerUsername;
         private String sellerName;
-        private Boolean isLegitProfile;
+        private Boolean isVerified;
         private Integer itemCount;
         private String overallStatus;
     }

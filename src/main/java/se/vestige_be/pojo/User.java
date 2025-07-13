@@ -74,9 +74,6 @@ public class User {
     private Integer successfulTransactions = 0;
 
     @Builder.Default
-    private Boolean isLegitProfile = false;
-
-    @Builder.Default
     private Boolean isVerified = false;
 
     @Column(length = 20)

@@ -30,33 +30,13 @@ public class CorsConfig {
     @Bean
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
-        // Allow origins
-        configuration.setAllowedOriginPatterns(List.of("*"));
-
-        // Allow methods
-        configuration.setAllowedMethods(Arrays.asList(
-                "GET", "POST", "PUT", "DELETE", "PATCH", "OPTIONS"
-        ));
-
-        // Allow headers
-        configuration.setAllowedHeaders(Arrays.asList(
-                "Authorization",
-                "Content-Type",
-                "X-Requested-With",
-                "Accept",
-                "Origin",
-                "Access-Control-Request-Method",
-                "Access-Control-Request-Headers"
-        ));
-
-        // Allow credentials
-        configuration.setAllowCredentials(true);
-
-        // Max age
-        configuration.setMaxAge(3600L);
+        
         // Parse allowed origins from comma-separated string
         List<String> origins = Arrays.asList(allowedOrigins.split(","));
         configuration.setAllowedOrigins(origins);
+        
+        // Also allow all origin patterns for webhook endpoints
+        configuration.setAllowedOriginPatterns(List.of("*"));
 
         // Parse allowed methods from comma-separated string
         List<String> methods = Arrays.asList(allowedMethods.split(","));
@@ -83,6 +63,7 @@ public class CorsConfig {
                 "X-Total-Count",
                 "X-Total-Pages"
         ));
+        
         UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
         source.registerCorsConfiguration("/**", configuration);
 

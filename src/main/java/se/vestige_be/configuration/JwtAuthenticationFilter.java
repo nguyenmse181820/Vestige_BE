@@ -30,8 +30,8 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     private final List<String> publicEndpoints = Arrays.asList(
             "/api/auth/**",
             "/api/stripe/webhook",
-            "/api/payos/webhook",
-            "/api/v1/payos/payment-callback",
+            "/api/payos/webhook/health",
+            "/api/ratings/stats",
             "/ws/**",
             "/chat/**",
             "/swagger-ui/**",
@@ -47,33 +47,15 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
     ) throws ServletException, IOException {
 
         String requestPath = request.getServletPath();
-        boolean isProfileRequest = requestPath.contains("/api/users/profile");
-        
-        if (isProfileRequest) {
-            System.out.println("=== JWT FILTER DEBUG ===");
-            System.out.println("Request Path: " + requestPath);
-        }
 
         if (isPublicEndpoint(request)) {
-            if (isProfileRequest) {
-                System.out.println("This is a PUBLIC endpoint - skipping authentication");
-                System.out.println("=== END JWT FILTER DEBUG ===");
-            }
             filterChain.doFilter(request, response);
             return;
-        }
-
-        if (isProfileRequest) {
-            System.out.println("This is a PROTECTED endpoint - processing authentication");
         }
 
         String jwt = null;
         String username = null;
         jwt = cookieUtil.getAccessTokenFromCookies(request.getCookies());
-
-        if (isProfileRequest) {
-            System.out.println("JWT from cookies: " + (jwt != null ? jwt.substring(0, Math.min(20, jwt.length())) + "..." : "null"));
-        }
 
         if (jwt == null) {
             final String authHeader = request.getHeader("Authorization");
@@ -84,9 +66,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (jwt != null) {
             username = jwtTokenUtil.extractUsername(jwt);
-            if (isProfileRequest) {
-                System.out.println("Extracted username: " + username);
-            }
         }
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
@@ -99,25 +78,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 );
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
                 SecurityContextHolder.getContext().setAuthentication(authToken);
-                
-                if (isProfileRequest) {
-                    System.out.println("Authentication successful! Authorities: " + userDetails.getAuthorities());
-                }
-            } else {
-                if (isProfileRequest) {
-                    System.out.println("Token validation FAILED!");
-                }
             }
-        } else {
-            if (isProfileRequest) {
-                System.out.println("No username extracted or authentication already exists");
-                System.out.println("Username: " + username);
-                System.out.println("Existing auth: " + SecurityContextHolder.getContext().getAuthentication());
-            }
-        }
-        
-        if (isProfileRequest) {
-            System.out.println("=== END JWT FILTER DEBUG ===");
         }
         
         filterChain.doFilter(request, response);
@@ -127,24 +88,11 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         AntPathMatcher pathMatcher = new AntPathMatcher();
         String requestPath = request.getServletPath();
         
-        boolean isProfileRequest = requestPath.contains("/api/users/profile");
-        boolean isMyProductsRequest = requestPath.contains("/api/products/my-products");
-        
-        if (isProfileRequest || isMyProductsRequest) {
-            System.out.println("=== PUBLIC ENDPOINT CHECK ===");
-            System.out.println("Request Path: " + requestPath);
-            
-            for (String pattern : publicEndpoints) {
-                boolean matches = pathMatcher.match(pattern, requestPath);
-                System.out.println("Pattern: " + pattern + " -> Matches: " + matches);
-                if (matches) {
-                    System.out.println("MATCHED PUBLIC PATTERN: " + pattern);
-                    System.out.println("=== END PUBLIC ENDPOINT CHECK ===");
-                    return true;
-                }
-            }
-            System.out.println("NO PUBLIC PATTERNS MATCHED");
-            System.out.println("=== END PUBLIC ENDPOINT CHECK ===");
+        // Special handling for membership endpoints - only plans and health endpoints are public
+        if (requestPath.startsWith("/api/memberships/") && 
+            "GET".equals(request.getMethod()) && 
+            (requestPath.endsWith("/plans") || requestPath.endsWith("/health"))) {
+            return true;
         }
         
         // Special handling for categories and brands - only GET operations are public

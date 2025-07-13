@@ -9,6 +9,7 @@ import se.vestige_be.pojo.enums.VerificationLevel;
 
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Entity
 @Table(name = "legit_profile_certifications")
@@ -38,8 +39,8 @@ public class LegitProfileCertification {
     private LocalDateTime approvedAt;
     private LocalDateTime expiresAt;
 
-    @Column(columnDefinition = "json")
-    private String verificationDocuments;
+    @OneToMany(mappedBy = "certification", cascade = CascadeType.ALL, orphanRemoval = true, fetch = FetchType.LAZY)
+    private List<CertificationDocument> documents;
 
     @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "reviewer_id")
@@ -64,7 +65,7 @@ public class LegitProfileCertification {
         this.expiresAt = LocalDateTime.now().plusMonths(expirationMonths);
 
         if (user != null) {
-            user.setIsLegitProfile(true);
+            user.setIsVerified(true);
         }
     }
 

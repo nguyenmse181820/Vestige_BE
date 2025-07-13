@@ -28,6 +28,8 @@ import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDate;
 import java.time.LocalDateTime;
+import java.util.*;
+import java.util.stream.Collectors;
 import java.time.format.DateTimeParseException;
 import java.util.*;
 import java.util.Comparator;
@@ -1105,18 +1107,7 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
         });
     }
 
-    private void handleItemShipped(OrderItem orderItem, OrderStatusUpdateRequest request) {
-        if (request.getTrackingNumber() == null || request.getTrackingNumber().isBlank()) {
-            throw new BusinessLogicException("Tracking number is required to mark item as shipped");
-        }
 
-        Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
-        transaction.setShippedAt(LocalDateTime.now());
-        transaction.setTrackingNumber(request.getTrackingNumber());
-        transaction.setTrackingUrl(request.getTrackingUrl());
-        transaction.setStatus(TransactionStatus.SHIPPED);
-        transactionRepository.save(transaction);
-    }
 
     private void handleItemDelivered(OrderItem orderItem) {
         Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
@@ -1700,7 +1691,65 @@ public void forceReleaseEscrow(Long transactionId, String notes, Long adminId) {
         log.error("Admin escrow release failed for transaction {}: {}", transactionId, e.getMessage());
         throw new BusinessLogicException("Escrow release failed: " + e.getMessage());
     }
-}    /**
+}
+
+    /**
+     * Get transactions eligible for review by a buyer
+     * Returns delivered transactions that haven't been reviewed yet
+     */
+    @Transactional(readOnly = true)
+    public List<Map<String, Object>> getTransactionsEligibleForReview(Long buyerId) {
+        List<Transaction> transactions = transactionRepository.findAll((root, query, criteriaBuilder) -> {
+            var predicates = List.of(
+                criteriaBuilder.equal(root.get("buyer").get("userId"), buyerId),
+                criteriaBuilder.equal(root.get("status"), TransactionStatus.DELIVERED)
+            );
+            return criteriaBuilder.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
+        });
+
+        return transactions.stream()
+                .filter(transaction -> !hasReview(transaction))
+                .map(this::mapTransactionForReview)
+                .collect(Collectors.toList());
+    }
+
+    private boolean hasReview(Transaction transaction) {
+        return !transaction.getReviews().isEmpty();
+    }
+
+    private Map<String, Object> mapTransactionForReview(Transaction transaction) {
+        OrderItem orderItem = transaction.getOrderItem();
+        Product product = orderItem.getProduct();
+        
+        Map<String, Object> result = new HashMap<>();
+        result.put("transactionId", transaction.getTransactionId());
+        result.put("amount", transaction.getAmount());
+        result.put("deliveredAt", transaction.getDeliveredAt());
+        
+        // Product info
+        Map<String, Object> productInfo = new HashMap<>();
+        productInfo.put("productId", product.getProductId());
+        productInfo.put("title", product.getTitle());
+        productInfo.put("condition", product.getCondition().toString());
+        if (product.getImages() != null && !product.getImages().isEmpty()) {
+            productInfo.put("imageUrl", product.getImages().get(0).getImageUrl());
+        }
+        result.put("product", productInfo);
+        
+        // Seller info
+        User seller = transaction.getSeller();
+        Map<String, Object> sellerInfo = new HashMap<>();
+        sellerInfo.put("sellerId", seller.getUserId());
+        sellerInfo.put("username", seller.getUsername());
+        sellerInfo.put("firstName", seller.getFirstName());
+        sellerInfo.put("lastName", seller.getLastName());
+        sellerInfo.put("sellerRating", seller.getSellerRating());
+        sellerInfo.put("sellerReviewsCount", seller.getSellerReviewsCount());
+        result.put("seller", sellerInfo);
+        
+        return result;
+    }
+    /**
      * Load product images separately to avoid MultipleBagFetchException
  * Spring Data JPA cannot fetch multiple collection relationships in a single query
  */

@@ -38,7 +38,7 @@ public class TrustScoreService {
 
         // Determine the tier based on the best score and lifetime sales
         long totalCompletedSales = orderItemRepository.countBySellerAndStatusAndCreatedAtAfter(user, OrderItemStatus.DELIVERED, LocalDateTime.now().minusYears(10));
-        TrustTier tier = determineTrustTier(bestScore, totalCompletedSales, user.getIsLegitProfile());
+        TrustTier tier = determineTrustTier(bestScore, totalCompletedSales, user.getIsVerified());
 
         // Update user and save
         user.setTrustScore(bestScore);
@@ -99,7 +99,7 @@ public class TrustScoreService {
 
     private double calculateProfileScore(User user) {
         double score = 0;
-        if (user.getIsLegitProfile()) score += 50;
+        if (user.getIsVerified()) score += 50;
         
         // Check if user has Stripe account (assuming stripeAccountId indicates active status)
         if (user.getStripeAccountId() != null && !user.getStripeAccountId().isEmpty()) score += 25;

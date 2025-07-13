@@ -13,6 +13,7 @@ import se.vestige_be.pojo.enums.OrderStatus;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecificationExecutor<Order> {
     @Query("SELECT DISTINCT o FROM Order o " +
@@ -54,4 +55,29 @@ public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecific
     
     // Methods needed for comprehensive statistics
     List<Order> findByCreatedAtBetween(LocalDateTime startDate, LocalDateTime endDate);
+    
+    // Enhanced methods with proper eager loading for OrderMapper
+    @Query("SELECT DISTINCT o FROM Order o " +
+           "LEFT JOIN FETCH o.buyer " +
+           "LEFT JOIN FETCH o.shippingAddress " +
+           "LEFT JOIN FETCH o.orderItems oi " +
+           "LEFT JOIN FETCH oi.product p " +
+           "LEFT JOIN FETCH p.images " +
+           "LEFT JOIN FETCH p.category " +
+           "LEFT JOIN FETCH p.brand " +
+           "LEFT JOIN FETCH oi.seller " +
+           "WHERE o.orderId = :orderId")
+    Optional<Order> findByIdWithAllRelationships(@Param("orderId") Long orderId);
+    
+    @Query("SELECT DISTINCT o FROM Order o " +
+           "LEFT JOIN FETCH o.buyer " +
+           "LEFT JOIN FETCH o.shippingAddress " +
+           "LEFT JOIN FETCH o.orderItems oi " +
+           "LEFT JOIN FETCH oi.product p " +
+           "LEFT JOIN FETCH p.images " +
+           "LEFT JOIN FETCH p.category " +
+           "LEFT JOIN FETCH p.brand " +
+           "LEFT JOIN FETCH oi.seller " +
+           "WHERE o.orderId IN :orderIds")
+    List<Order> findByOrderIdInWithAllRelationships(@Param("orderIds") List<Long> orderIds);
 }

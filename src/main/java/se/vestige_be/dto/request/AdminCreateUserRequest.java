@@ -52,6 +52,5 @@ public class AdminCreateUserRequest {
     private String roleName;
 
     private Boolean isVerified;
-    private Boolean isLegitProfile;
     private String accountStatus;
 }

@@ -44,11 +44,11 @@ public class UserController {
             @RequestParam(defaultValue = "joinedDate") String sortBy,
             @RequestParam(defaultValue = "desc") String sortDir,
             @RequestParam(required = false) String search,
-            @RequestParam(required = false) Boolean isLegitProfile,
+            @RequestParam(required = false) Boolean isVerified,
             @RequestParam(required = false) String accountStatus) {
 
         Pageable pageable = PaginationUtils.createPageable(page, size, sortBy, sortDir);
-        PagedResponse<UserListResponse> users = userService.getAllUsers(pageable, search, isLegitProfile, accountStatus);
+        PagedResponse<UserListResponse> users = userService.getAllUsers(pageable, search, isVerified, accountStatus);
 
         return ResponseEntity.ok(ApiResponse.<PagedResponse<UserListResponse>>builder()
                 .status(HttpStatus.OK.toString())
@@ -304,15 +304,15 @@ public class UserController {
             @Parameter(description = "Search by username or email")
             @RequestParam(required = false) String search,
             
-            @Parameter(description = "Filter by legit profile status")
-            @RequestParam(required = false) Boolean isLegitProfile,
+            @Parameter(description = "Filter by verification status")
+            @RequestParam(required = false) Boolean isVerified,
             
             @Parameter(description = "Filter by account status")
             @RequestParam(required = false) String accountStatus) {
 
         Pageable pageable = PaginationUtils.createPageable(page, size, sortBy, sortDir);
         PagedResponse<UserStatisticsResponse> userStatistics = userService.getAllUsersWithStatistics(
-                pageable, search, isLegitProfile, accountStatus);
+                pageable, search, isVerified, accountStatus);
 
         return ResponseEntity.ok(ApiResponse.<PagedResponse<UserStatisticsResponse>>builder()
                 .status(HttpStatus.OK.toString())
@@ -357,14 +357,14 @@ public class UserController {
             @Parameter(description = "Search by username or email")
             @RequestParam(required = false) String search,
             
-            @Parameter(description = "Filter by legit profile status")
-            @RequestParam(required = false) Boolean isLegitProfile,
+            @Parameter(description = "Filter by verification status")
+            @RequestParam(required = false) Boolean isVerified,
             
             @Parameter(description = "Filter by account status")
             @RequestParam(required = false) String accountStatus) {
 
         Pageable pageable = PaginationUtils.createPageable(page, size, sortBy, sortDir);
-        PagedResponse<UserListResponse> users = userService.getAllUsers(pageable, search, isLegitProfile, accountStatus);
+        PagedResponse<UserListResponse> users = userService.getAllUsers(pageable, search, isVerified, accountStatus);
 
         return ResponseEntity.ok(ApiResponse.<PagedResponse<UserListResponse>>builder()
                 .status(HttpStatus.OK.toString())
@@ -404,14 +404,11 @@ public class UserController {
             @Parameter(description = "New verification status to apply")
             @RequestParam(required = false) Boolean isVerified,
             
-            @Parameter(description = "New legit profile status to apply")
-            @RequestParam(required = false) Boolean isLegitProfile,
-            
             @Parameter(hidden = true)
             @AuthenticationPrincipal UserDetails adminDetails) {
         
         try {
-            userService.bulkUpdateUsers(userIds, accountStatus, isVerified, isLegitProfile);
+            userService.bulkUpdateUsers(userIds, accountStatus, isVerified);
             return ResponseEntity.ok(ApiResponse.<String>builder()
                     .status(HttpStatus.OK.toString())
                     .message("Bulk user update completed successfully")

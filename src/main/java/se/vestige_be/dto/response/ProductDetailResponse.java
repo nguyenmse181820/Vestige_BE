@@ -46,7 +46,7 @@ public class ProductDetailResponse {    private Long productId;
         private String firstName;
         private String lastName;
         private String profilePictureUrl;
-        private Boolean isLegitProfile;
+        private Boolean isVerified;
         private BigDecimal sellerRating;
         private Integer sellerReviewsCount;
         private Integer successfulTransactions;

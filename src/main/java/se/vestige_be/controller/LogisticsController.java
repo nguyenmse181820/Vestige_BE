@@ -16,9 +16,9 @@ import se.vestige_be.dto.request.ConfirmPickupRequest;
 import se.vestige_be.dto.request.ConfirmDeliveryRequest;
 import se.vestige_be.dto.response.ApiResponse;
 import se.vestige_be.dto.response.OrderDetailResponse;
+import se.vestige_be.dto.response.PickupItemResponse;
 
 import jakarta.validation.Valid;
-import se.vestige_be.pojo.OrderItem;
 import se.vestige_be.service.LogisticsService;
 
 import java.util.List;
@@ -56,10 +56,10 @@ public class LogisticsController {
     })
     @SecurityRequirement(name = "bearerAuth")
     @GetMapping("/pickups")
-    public ResponseEntity<ApiResponse<List<OrderItem>>> getItemsAwaitingPickup() {
-        List<OrderItem> items = logisticsService.getItemsAwaitingPickup();
+    public ResponseEntity<ApiResponse<List<PickupItemResponse>>> getItemsAwaitingPickup() {
+        List<PickupItemResponse> items = logisticsService.getItemsAwaitingPickup();
         
-        return ResponseEntity.ok(ApiResponse.<List<OrderItem>>builder()
+        return ResponseEntity.ok(ApiResponse.<List<PickupItemResponse>>builder()
                 .message("Items awaiting pickup retrieved successfully")
                 .data(items)
                 .build());

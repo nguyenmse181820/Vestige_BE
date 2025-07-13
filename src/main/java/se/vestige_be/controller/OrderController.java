@@ -286,31 +286,7 @@ public class OrderController {
                 .build());
     }
 
-    @PostMapping("/{orderId}/items/{itemId}/ship")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<OrderDetailResponse>> shipOrderItem(
-            @PathVariable Long orderId,
-            @PathVariable Long itemId,
-            @Valid @RequestBody OrderStatusUpdateRequest request,
-            @AuthenticationPrincipal UserDetails userDetails) {
 
-        User user = userService.findByUsername(userDetails.getUsername());
-
-        try {
-            // Set status to SHIPPED in the request
-            request.setStatus("SHIPPED");
-            OrderDetailResponse order = orderService.updateOrderItemStatus(orderId, itemId, request, user.getUserId());
-            return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
-                    .message("Item shipped successfully")
-                    .data(order)
-                    .build());
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.BAD_REQUEST)
-                    .body(ApiResponse.<OrderDetailResponse>builder()
-                            .message(e.getMessage())
-                            .build());
-        }
-    }
 
     @PostMapping("/{orderId}/items/{itemId}/confirm-delivery")
     @PreAuthorize("hasRole('USER')")
@@ -1109,6 +1085,26 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
                 .message("Pickup requested. Our shipper will arrive shortly.")
                 .data(order)
+                .build());
+    }
+
+    @Operation(
+            summary = "Get transactions eligible for review",
+            description = "Get all completed transactions by the current user that are eligible for review (delivered but not yet reviewed)."
+    )
+    @SecurityRequirement(name = "bearerAuth")
+    @GetMapping("/eligible-for-review")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getTransactionsEligibleForReview(
+            @Parameter(hidden = true)
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        User user = userService.findByUsername(userDetails.getUsername());
+        List<Map<String, Object>> eligibleTransactions = orderService.getTransactionsEligibleForReview(user.getUserId());
+        
+        return ResponseEntity.ok(ApiResponse.<List<Map<String, Object>>>builder()
+                .message("Eligible transactions for review retrieved successfully")
+                .data(eligibleTransactions)
                 .build());
     }
 }

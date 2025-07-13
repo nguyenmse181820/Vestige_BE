@@ -656,7 +656,7 @@ public class ProductService {
                         .firstName(product.getSeller().getFirstName())
                         .lastName(product.getSeller().getLastName())
                         .profilePictureUrl(product.getSeller().getProfilePictureUrl())
-                        .isLegitProfile(product.getSeller().getIsLegitProfile())
+                        .isVerified(product.getSeller().getIsVerified())
                         .sellerRating(product.getSeller().getSellerRating())
                         .sellerReviewsCount(product.getSeller().getSellerReviewsCount())
                         .successfulTransactions(product.getSeller().getSuccessfulTransactions())

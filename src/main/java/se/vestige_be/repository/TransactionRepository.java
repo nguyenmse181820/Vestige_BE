@@ -43,4 +43,18 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
     
     // New method for trust score calculations
     long countBySellerAndDisputeStatusAndCreatedAtAfter(se.vestige_be.pojo.User seller, se.vestige_be.pojo.enums.DisputeStatus disputeStatus, LocalDateTime date);
+    
+    // Enhanced method with proper eager loading for OrderMapper
+    @Query("SELECT DISTINCT t FROM Transaction t " +
+           "LEFT JOIN FETCH t.buyer " +
+           "LEFT JOIN FETCH t.seller " +
+           "LEFT JOIN FETCH t.orderItem oi " +
+           "LEFT JOIN FETCH oi.order " +
+           "LEFT JOIN FETCH oi.product p " +
+           "LEFT JOIN FETCH p.images " +
+           "LEFT JOIN FETCH p.category " +
+           "LEFT JOIN FETCH p.brand " +
+           "LEFT JOIN FETCH t.reviews r " +
+           "WHERE oi.orderItemId = :orderItemId")
+    Optional<Transaction> findByOrderItemOrderItemIdWithAllRelationships(@Param("orderItemId") Long orderItemId);
 }

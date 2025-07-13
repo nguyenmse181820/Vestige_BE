@@ -55,6 +55,15 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
     // Admin methods for statistics
     List<OrderItem> findByStatus(OrderItemStatus status);
     
+    // Method for logistics with eager loading
+    @Query("SELECT oi FROM OrderItem oi " +
+           "LEFT JOIN FETCH oi.product p " +
+           "LEFT JOIN FETCH oi.seller s " +
+           "LEFT JOIN FETCH oi.order o " +
+           "WHERE oi.status = :status " +
+           "ORDER BY oi.createdAt ASC")
+    List<OrderItem> findByStatusWithDetails(@Param("status") OrderItemStatus status);
+    
     // Methods for admin order summaries
     List<OrderItem> findBySellerUserId(Long sellerId);
     

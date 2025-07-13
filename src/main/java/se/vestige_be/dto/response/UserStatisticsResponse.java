@@ -19,7 +19,6 @@ public class UserStatisticsResponse {
     private String fullName;
     private LocalDateTime joinedDate;
     private String accountStatus;
-    private Boolean isLegitProfile;
     private Boolean isVerified;
     
     // Order statistics

@@ -18,7 +18,7 @@ import java.util.List;
 import java.util.Optional;
 
 @RestController
-@RequestMapping("/api/v1/memberships")
+@RequestMapping("/api/memberships")  // Use only the standard API path
 @RequiredArgsConstructor
 @Slf4j
 @io.swagger.v3.oas.annotations.tags.Tag(name = "Membership Management", description = "APIs for managing user memberships and subscription plans")
@@ -27,23 +27,45 @@ public class MembershipController {
     private final MembershipService membershipService;
 
     @GetMapping("/plans")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Get all membership plans")
     public ResponseEntity<ApiResponse<List<MembershipPlan>>> getAllPlans() {
         try {
             List<MembershipPlan> plans = membershipService.getAllPlans();
             return ResponseEntity.ok(ApiResponse.success("Membership plans retrieved successfully", plans));
         } catch (Exception e) {
+            log.error("Error retrieving membership plans: {}", e.getMessage(), e);
             return ResponseEntity.badRequest()
                     .body(ApiResponse.error("Failed to retrieve membership plans: " + e.getMessage()));
         }
     }
 
-    @GetMapping("/current")
-    public ResponseEntity<ApiResponse<UserMembershipDTO>> getActiveMembership(@AuthenticationPrincipal UserDetails currentUser) {
-        Optional<UserMembershipDTO> activeMembership = membershipService.getActiveMembership(currentUser);
+    @GetMapping("/health")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Health check for membership service")
+    public ResponseEntity<ApiResponse<String>> healthCheck() {
+        return ResponseEntity.ok(ApiResponse.success("Membership service is running", "OK"));
+    }
 
-        return activeMembership
-                .map(membershipDTO -> ResponseEntity.ok(ApiResponse.success("Active membership found.", membershipDTO)))
-                .orElseGet(() -> ResponseEntity.ok(ApiResponse.success("No active membership found.", null)));
+    @GetMapping("/current")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Get current active membership")
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearer-auth")
+    public ResponseEntity<ApiResponse<UserMembershipDTO>> getActiveMembership(@AuthenticationPrincipal UserDetails currentUser) {
+        try {
+            if (currentUser == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ApiResponse.error("Authentication required to access membership information"));
+            }
+            
+            Optional<UserMembershipDTO> activeMembership = membershipService.getActiveMembership(currentUser);
+
+            return activeMembership
+                    .map(membershipDTO -> ResponseEntity.ok(ApiResponse.success("Active membership found.", membershipDTO)))
+                    .orElseGet(() -> ResponseEntity.ok(ApiResponse.success("No active membership found.", null)));
+        } catch (Exception e) {
+            log.error("Error retrieving active membership for user {}: {}", 
+                currentUser != null ? currentUser.getUsername() : "unknown", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Failed to retrieve membership information: " + e.getMessage()));
+        }
     }
 
     @PostMapping("/subscription/{planId}")

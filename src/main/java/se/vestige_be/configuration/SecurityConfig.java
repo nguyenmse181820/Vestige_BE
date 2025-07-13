@@ -55,14 +55,14 @@ public class SecurityConfig {
                         .requestMatchers(
                                 "/api/auth/**",
                                 "/api/stripe/webhook",
-                                "/api/payos/webhook",
-                                "/api/v1/payos/payment-callback",
+                                "/api/payos/webhook/health",
                                 "/ws/**", "/chat/**",
                                 "/css/**", "/js/**", "/static/**",
                                 "/swagger-ui.html", "/swagger-ui/**",
                                 "/v3/api-docs/**",
                                 "/actuator/**"
                         ).permitAll()
+                        .requestMatchers(HttpMethod.GET, "/api/memberships/plans", "/api/memberships/health").permitAll()  // Public membership endpoints
                         .requestMatchers(HttpMethod.GET, "/api/categories/**", "/api/brands/**").permitAll()
                         .requestMatchers(HttpMethod.GET, "/api/users/{id:[0-9]+}").permitAll()  // Only numeric IDs
                         .requestMatchers(HttpMethod.GET, 

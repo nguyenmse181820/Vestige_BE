@@ -15,8 +15,7 @@ public class TrustScoreUpdateTask {
     private final UserRepository userRepository;
     private final TrustScoreService trustScoreService;
 
-    // Run once every day at 3:00 AM
-    @Scheduled(cron = "0 0 3 * * ?")
+    @Scheduled(cron = "0 0 0 * * ?")
     public void updateAllUserTrustScores() {
         log.info("Starting nightly Trust Score update task.");
         userRepository.findAll().forEach(trustScoreService::updateUserTrustScore);

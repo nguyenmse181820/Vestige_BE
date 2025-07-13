@@ -87,7 +87,7 @@ public class OrderDetailResponse {
         private String username;
         private String firstName;
         private String lastName;
-        private Boolean isLegitProfile;
+        private Boolean isVerified;
         private BigDecimal sellerRating;
         private Integer sellerReviewsCount;
     }
@@ -103,6 +103,22 @@ public class OrderDetailResponse {
         private LocalDateTime shippedAt;
         private LocalDateTime deliveredAt;
         private Boolean buyerProtectionEligible;
+        private Boolean canReview;
+        private Boolean hasReview;
+        private ReviewInfo review;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class ReviewInfo {
+        private Long reviewId;
+        private Integer rating;
+        private String comment;
+        private Integer authenticityRating;
+        private String authenticityComment;
+        private LocalDateTime createdAt;
     }
 
     @Data

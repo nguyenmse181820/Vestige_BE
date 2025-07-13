@@ -44,7 +44,6 @@ public class AdminUpdateUserRequest {
     private Gender gender;
     private String roleName;
     private Boolean isVerified;
-    private Boolean isLegitProfile;
     private String accountStatus;
     private Boolean isActive;
 }

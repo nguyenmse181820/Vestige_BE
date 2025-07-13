@@ -28,7 +28,6 @@ public class UserListResponse {
     private BigDecimal sellerRating;
     private Integer sellerReviewsCount;
     private Integer successfulTransactions;
-    private Boolean isLegitProfile;
     private Boolean isVerified;
     private String accountStatus;
     private Integer trustScore;

@@ -74,8 +74,8 @@ public class UserService {
         return userRepository.existsByEmail(email);
     }
 
-    public PagedResponse<UserListResponse> getAllUsers(Pageable pageable, String search, Boolean isLegitProfile, String accountStatus) {
-        Specification<User> spec = buildUserSpecification(search, isLegitProfile, accountStatus);
+    public PagedResponse<UserListResponse> getAllUsers(Pageable pageable, String search, Boolean isVerified, String accountStatus) {
+        Specification<User> spec = buildUserSpecification(search, isVerified, accountStatus);
         Page<User> users = userRepository.findAll(spec, pageable);
         Page<UserListResponse> userResponses = users.map(this::convertToListResponse);
         return PagedResponse.of(userResponses);
@@ -92,9 +92,9 @@ public class UserService {
         return convertToProfileResponse(user);
     }
 
-    private Specification<User> buildUserSpecification(String search, Boolean isLegitProfile, String accountStatus) {
+    private Specification<User> buildUserSpecification(String search, Boolean isVerified, String accountStatus) {
         return Specification.where(hasSearch(search))
-                .and(hasLegitProfile(isLegitProfile))
+                .and(hasVerifiedStatus(isVerified))
                 .and(hasAccountStatus(accountStatus));
     }
 
@@ -113,12 +113,12 @@ public class UserService {
         };
     }
 
-    private Specification<User> hasLegitProfile(Boolean isLegitProfile) {
+    private Specification<User> hasVerifiedStatus(Boolean isVerified) {
         return (root, query, criteriaBuilder) -> {
-            if (isLegitProfile == null) {
+            if (isVerified == null) {
                 return null;
             }
-            return criteriaBuilder.equal(root.get("isLegitProfile"), isLegitProfile);
+            return criteriaBuilder.equal(root.get("isVerified"), isVerified);
         };
     }
 
@@ -155,7 +155,6 @@ public class UserService {
                 .sellerRating(BigDecimal.ZERO)
                 .sellerReviewsCount(0)
                 .successfulTransactions(0)
-                .isLegitProfile(false)
                 .isVerified(false)
                 .trustScore(100)
                 .accountStatus("active")
@@ -258,7 +257,6 @@ public class UserService {
                 .sellerRating(user.getSellerRating())
                 .sellerReviewsCount(user.getSellerReviewsCount())
                 .successfulTransactions(user.getSuccessfulTransactions())
-                .isLegitProfile(user.getIsLegitProfile())
                 .isVerified(user.getIsVerified())
                 .accountStatus(user.getAccountStatus())
                 .trustScore(user.getTrustScore())
@@ -295,7 +293,6 @@ public class UserService {
                 .gender(request.getGender())
                 .role(roleToAssign)
                 .isVerified(request.getIsVerified() != null ? request.getIsVerified() : false)
-                .isLegitProfile(request.getIsLegitProfile() != null ? request.getIsLegitProfile() : false)
                 .accountStatus(request.getAccountStatus() != null ? request.getAccountStatus().toLowerCase() : "active")
                 .sellerRating(BigDecimal.ZERO)
                 .sellerReviewsCount(0)
@@ -330,7 +327,6 @@ public class UserService {
                 .sellerRating(user.getSellerRating())
                 .sellerReviewsCount(user.getSellerReviewsCount())
                 .successfulTransactions(user.getSuccessfulTransactions())
-                .isLegitProfile(user.getIsLegitProfile())
                 .isVerified(user.getIsVerified())
                 .accountStatus(user.getAccountStatus())
                 .trustScore(user.getTrustScore())
@@ -398,10 +394,6 @@ public class UserService {
             user.setIsVerified(request.getIsVerified());
         }
 
-        if (request.getIsLegitProfile() != null) {
-            user.setIsLegitProfile(request.getIsLegitProfile());
-        }
-
         if (request.getAccountStatus() != null) {
             user.setAccountStatus(request.getAccountStatus());
         }
@@ -451,7 +443,6 @@ public class UserService {
                 .fullName(user.getFirstName() + " " + user.getLastName())
                 .joinedDate(user.getJoinedDate())
                 .accountStatus(user.getAccountStatus())
-                .isLegitProfile(user.getIsLegitProfile())
                 .isVerified(user.getIsVerified())
                 .totalOrders(totalOrders)
                 .completedOrders(completedOrders)
@@ -468,8 +459,8 @@ public class UserService {
                 .build();
     }
 
-    public PagedResponse<UserStatisticsResponse> getAllUsersWithStatistics(Pageable pageable, String search, Boolean isLegitProfile, String accountStatus) {
-        Specification<User> spec = buildUserSpecification(search, isLegitProfile, accountStatus);
+    public PagedResponse<UserStatisticsResponse> getAllUsersWithStatistics(Pageable pageable, String search, Boolean isVerified, String accountStatus) {
+        Specification<User> spec = buildUserSpecification(search, isVerified, accountStatus);
         Page<User> users = userRepository.findAll(spec, pageable);
         Page<UserStatisticsResponse> userStatistics = users.map(user -> getUserStatistics(user.getUserId()));
         return PagedResponse.of(userStatistics);
@@ -507,7 +498,7 @@ public class UserService {
     }
 
     @Transactional
-    public void bulkUpdateUsers(List<Long> userIds, String accountStatus, Boolean isVerified, Boolean isLegitProfile) {
+    public void bulkUpdateUsers(List<Long> userIds, String accountStatus, Boolean isVerified) {
         List<User> users = userRepository.findAllById(userIds);
         
         for (User user : users) {
@@ -520,11 +511,6 @@ public class UserService {
             
             if (isVerified != null) {
                 user.setIsVerified(isVerified);
-                updated = true;
-            }
-            
-            if (isLegitProfile != null) {
-                user.setIsLegitProfile(isLegitProfile);
                 updated = true;
             }
             
@@ -542,7 +528,6 @@ public class UserService {
         long newUsers = userRepository.countByJoinedDateAfter(since);
         long activeUsers = userRepository.countByLastLoginAtAfter(since);
         long verifiedUsers = userRepository.countByIsVerifiedTrue();
-        long legitimateUsers = userRepository.countByIsLegitProfileTrue();
         
         // Get account status breakdown
         Map<String, Long> statusBreakdown = userRepository.findAll().stream()
@@ -556,7 +541,6 @@ public class UserService {
             "newUsersLast" + days + "Days", newUsers,
             "activeUsersLast" + days + "Days", activeUsers,
             "verifiedUsers", verifiedUsers,
-            "legitimateUsers", legitimateUsers,
             "accountStatusBreakdown", statusBreakdown,
             "reportGeneratedAt", LocalDateTime.now(),
             "reportPeriodDays", days

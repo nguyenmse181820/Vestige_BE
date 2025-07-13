@@ -64,21 +64,24 @@ public class PayOsService {
 
             // Create payment data with truncated description (PayOS limit: 25 characters)
             String description = createPaymentDescription(plan.getName(), user.getUsername());
+            // Use frontend URLs for user redirection after payment
+            String returnUrl = baseUrl.replace(":8080", ":3000") + "/payment-success"; // Frontend success page
+            String cancelUrl = baseUrl.replace(":8080", ":3000") + "/payment-cancel"; // Frontend cancel page
                       
             PaymentData paymentData = PaymentData.builder()
                     .orderCode(Long.parseLong(orderCode))
                     .amount(plan.getPrice().intValue())
                     .description(description)
                     .items(Arrays.asList(item))
-                    .cancelUrl(baseUrl + "/api/v1/payos/payment-callback")
-                    .returnUrl(baseUrl + "/api/v1/payos/payment-callback")
+                    .cancelUrl(cancelUrl)
+                    .returnUrl(returnUrl)
                     .build();
 
             // Create payment link
             CheckoutResponseData result = payOS.createPaymentLink(paymentData);
             
-            log.info("Created PayOS payment link for user {} and plan {}: orderCode={}, checkoutUrl={}", 
-                    user.getUsername(), plan.getName(), orderCode, result.getCheckoutUrl());
+            log.info("Created PayOS payment link for user {} and plan {}: orderCode={}, checkoutUrl={}, returnUrl={}, cancelUrl={}", 
+                    user.getUsername(), plan.getName(), orderCode, result.getCheckoutUrl(), returnUrl, cancelUrl);
             
             return CreatePaymentLinkResult.builder()
                     .checkoutUrl(result.getCheckoutUrl())

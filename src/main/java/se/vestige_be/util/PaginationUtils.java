@@ -10,6 +10,10 @@ import java.util.Map;
 public class PaginationUtils {
 
     public static Pageable createPageable(int page, int size, String sortBy, String sortDir) {
+        // Add bounds checking to prevent integer overflow
+        int safePage = Math.max(0, Math.min(page, 10000));
+        int safeSize = Math.max(1, Math.min(size, 100));
+        
         Sort.Direction direction = sortDir.equalsIgnoreCase("desc") ?
                 Sort.Direction.DESC : Sort.Direction.ASC;
         // Support aliases for viewCount and likeCount
@@ -21,7 +25,7 @@ public class PaginationUtils {
         } else {
             actualSortBy = sortBy;
         }
-        return PageRequest.of(page, size, Sort.by(direction, actualSortBy));
+        return PageRequest.of(safePage, safeSize, Sort.by(direction, actualSortBy));
     }
 
     public static Map<String, Object> createFilters(String search, Long categoryId, Long brandId) {

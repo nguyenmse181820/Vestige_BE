@@ -28,18 +28,34 @@ public class OrderListResponse {
 
     private String overallEscrowStatus;
     private BigDecimal totalPlatformFee;
+    
+    private BuyerInfo buyer;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BuyerInfo {
+        private Long userId;
+        private String username;
+        private String firstName;
+        private String lastName;
+        private String phoneNumber;
+        private String email;
+    }
 
     @Data
     @Builder
     @NoArgsConstructor
     @AllArgsConstructor
     public static class OrderItemSummary {
+        private Long orderItemId;
         private Long productId;
         private String productTitle;
         private String productImage;
         private BigDecimal price;
         private String sellerUsername;
-        private Boolean sellerIsLegitProfile;
+        private Boolean sellerIsVerified;
         private String escrowStatus;
         private String itemStatus;
     }

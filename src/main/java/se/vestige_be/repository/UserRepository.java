@@ -18,7 +18,6 @@ public interface UserRepository extends JpaRepository<User,Long>, JpaSpecificati
     long countByJoinedDateAfter(LocalDateTime since);
     long countByLastLoginAtAfter(LocalDateTime since);
     long countByIsVerifiedTrue();
-    long countByIsLegitProfileTrue();
     
     // Methods for admin user summaries
     org.springframework.data.domain.Page<User> findByUsernameContainingOrEmailContaining(String username, String email, org.springframework.data.domain.Pageable pageable);

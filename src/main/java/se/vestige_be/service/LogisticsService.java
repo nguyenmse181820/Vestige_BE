@@ -8,6 +8,8 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.request.ConfirmPickupRequest;
 import se.vestige_be.dto.response.OrderDetailResponse;
+import se.vestige_be.dto.response.PickupItemResponse;
+import se.vestige_be.dto.response.UserAddressResponse;
 import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.pojo.Order;
@@ -15,7 +17,9 @@ import se.vestige_be.pojo.OrderItem;
 import se.vestige_be.pojo.PickupEvidence;
 import se.vestige_be.pojo.DeliveryEvidence;
 import se.vestige_be.pojo.Transaction;
+import se.vestige_be.pojo.enums.EscrowStatus;
 import se.vestige_be.pojo.enums.OrderItemStatus;
+import se.vestige_be.pojo.enums.TransactionStatus;
 import se.vestige_be.repository.OrderItemRepository;
 import se.vestige_be.repository.OrderRepository;
 import se.vestige_be.repository.PickupEvidenceRepository;
@@ -40,20 +44,24 @@ public class LogisticsService {
     private final EscrowService escrowService;
     private final OrderService orderService;
     private final StatusHistoryService statusHistoryService;
+    private final UserAddressService userAddressService;
 
-    public List<OrderItem> getItemsAwaitingPickup() {
+    public List<PickupItemResponse> getItemsAwaitingPickup() {
         log.info("Retrieving all items awaiting pickup");
-        return orderItemRepository.findByStatus(OrderItemStatus.AWAITING_PICKUP);
+        List<OrderItem> items = orderItemRepository.findByStatusWithDetails(OrderItemStatus.AWAITING_PICKUP);
+        return items.stream()
+                .map(this::convertToPickupItemResponse)
+                .toList();
     }
 
     @Transactional
     public OrderDetailResponse confirmPickup(ConfirmPickupRequest request) {
-        log.info("Confirming pickup for transaction: {} with {} evidence photos", 
-                request.getTransactionId(), request.getPhotoUrls().size());
+        log.info("Confirming pickup for order item: {} with {} evidence photos", 
+                request.getOrderItemId(), request.getPhotoUrls().size());
         
-        // Find the transaction
-        Transaction transaction = transactionRepository.findById(request.getTransactionId())
-                .orElseThrow(() -> new ResourceNotFoundException("Transaction not found: " + request.getTransactionId()));
+        // Find the transaction by order item ID
+        Transaction transaction = transactionRepository.findByOrderItemOrderItemId(request.getOrderItemId())
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction not found for order item: " + request.getOrderItemId()));
 
         OrderItem orderItem = transaction.getOrderItem();
         
@@ -96,8 +104,8 @@ public class LogisticsService {
         updateOverallOrderStatus(order);
         orderRepository.save(order);
 
-        log.info("Pickup confirmed for transaction {}. Tracking number: {}. Evidence photos saved: {}", 
-                request.getTransactionId(), trackingNumber, request.getPhotoUrls().size());
+        log.info("Pickup confirmed for order item {}. Tracking number: {}. Evidence photos saved: {}", 
+                request.getOrderItemId(), trackingNumber, request.getPhotoUrls().size());
         return convertToDetailResponse(order);
     }
 
@@ -155,6 +163,8 @@ public class LogisticsService {
         orderItem.setStatus(OrderItemStatus.DELIVERED);
 
         Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
+        transaction.setStatus(TransactionStatus.DELIVERED);
+        transaction.setEscrowStatus(EscrowStatus.RELEASED);
         transaction.setDeliveredAt(LocalDateTime.now());
 
         // 1. Get the existing list from the managed entity
@@ -226,5 +236,48 @@ public class LogisticsService {
     private OrderDetailResponse convertToDetailResponse(Order order) {
         // Delegate to OrderService for consistent response conversion
         return orderService.convertToDetailResponse(order);
+    }
+
+    private PickupItemResponse convertToPickupItemResponse(OrderItem orderItem) {
+        // Get the corresponding transaction for this order item
+        Transaction transaction = transactionRepository.findByOrderItemOrderItemId(orderItem.getOrderItemId())
+                .orElse(null);
+        
+        // Get seller's default address for pickup location
+        List<UserAddressResponse> sellerAddresses = userAddressService.getUserAddresses(orderItem.getSeller().getUserId());
+        UserAddressResponse defaultAddress = sellerAddresses.stream()
+                .filter(UserAddressResponse::getIsDefault)
+                .findFirst()
+                .orElse(sellerAddresses.isEmpty() ? null : sellerAddresses.get(0)); // Fallback to first address if no default
+
+        return PickupItemResponse.builder()
+                .orderItemId(orderItem.getOrderItemId())
+                .orderId(orderItem.getOrder().getOrderId())
+                .orderCode("ORD-" + orderItem.getOrder().getOrderId()) // Generate order code
+                .productId(orderItem.getProduct().getProductId())
+                .productName(orderItem.getProduct().getTitle()) // Use title field
+                .productSlug(orderItem.getProduct().getSlug())
+                .sellerId(orderItem.getSeller().getUserId())
+                .sellerUsername(orderItem.getSeller().getUsername())
+                .sellerFirstName(orderItem.getSeller().getFirstName())
+                .sellerLastName(orderItem.getSeller().getLastName())
+                
+                // Add seller address information for pickup
+                .sellerAddressId(defaultAddress != null ? defaultAddress.getAddressId() : null)
+                .sellerAddressLine1(defaultAddress != null ? defaultAddress.getAddressLine1() : null)
+                .sellerAddressLine2(defaultAddress != null ? defaultAddress.getAddressLine2() : null)
+                .sellerCity(defaultAddress != null ? defaultAddress.getCity() : null)
+                .sellerState(defaultAddress != null ? defaultAddress.getState() : null)
+                .sellerPostalCode(defaultAddress != null ? defaultAddress.getPostalCode() : null)
+                .sellerCountry(defaultAddress != null ? defaultAddress.getCountry() : null)
+                
+                .price(orderItem.getPrice())
+                .platformFee(orderItem.getPlatformFee())
+                .feePercentage(orderItem.getFeePercentage())
+                .status(orderItem.getStatus())
+                .escrowStatus(orderItem.getEscrowStatus())
+                .createdAt(orderItem.getCreatedAt())
+                .updatedAt(orderItem.getUpdatedAt())
+                .build();
     }
 }

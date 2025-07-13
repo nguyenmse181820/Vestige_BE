@@ -14,8 +14,8 @@ import java.util.List;
 @AllArgsConstructor
 public class ConfirmPickupRequest {
     
-    @NotNull(message = "Transaction ID is required")
-    private Long transactionId;
+    @NotNull(message = "Order Item ID is required")
+    private Long orderItemId;
     
     @NotEmpty(message = "At least one photo URL is required.")
     @Size(min = 1, max = 10, message = "Must provide between 1 and 10 photo URLs")

@@ -10,7 +10,9 @@ import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.mapper.ModelMapper;
 import se.vestige_be.pojo.*;
+import se.vestige_be.pojo.enums.EscrowStatus;
 import se.vestige_be.pojo.enums.MembershipStatus;
+import se.vestige_be.pojo.enums.TransactionStatus;
 import se.vestige_be.repository.*;
 
 import java.math.BigDecimal;
@@ -172,26 +174,47 @@ public class MembershipService {
         User user = membership.getUser();
 
         // Update membership details
-        membership.setStatus(MembershipStatus.ACTIVE);
-        membership.setPayosSubscriptionId(orderCode); // Keep the order code as subscription ID
-        membership.setBoostsRemaining(plan.getBoostsPerMonth());
-        membership.setStartDate(LocalDateTime.now());
-        membership.setEndDate(LocalDateTime.now().plusMonths(1));
+        try {
+            log.info("Updating membership status to ACTIVE for order code: {}", orderCode);
+            membership.setStatus(MembershipStatus.ACTIVE);
+            membership.setPayosSubscriptionId(orderCode); // Keep the order code as subscription ID
+            membership.setBoostsRemaining(plan.getBoostsPerMonth());
+            membership.setStartDate(LocalDateTime.now());
+            membership.setEndDate(LocalDateTime.now().plusMonths(1));
 
-        userMembershipRepository.save(membership);
+            log.info("Saving membership with ID: {}, Status: {}, PayOS ID: {}", 
+                    membership.getMembershipId(), membership.getStatus(), membership.getPayosSubscriptionId());
+            
+            userMembershipRepository.save(membership);
+            log.info("Membership updated successfully in database");
+            
+        } catch (Exception dbException) {
+            log.error("Database error during membership update: {}", dbException.getMessage(), dbException);
+            throw new RuntimeException("Database error during membership update: " + dbException.getMessage(), dbException);
+        }
 
         // Create transaction record for this payment
-        Transaction transaction = Transaction.builder()
-                .seller(null) // No seller for membership payments
-                .buyer(user)
-                .amount(plan.getPrice())
-                .platformFee(BigDecimal.ZERO) // No platform fee for membership payments
-                .feePercentage(BigDecimal.ZERO)
-                .payosOrderCode(orderCode)
-                .paidAt(LocalDateTime.now())
-                .build();
+        try {
+            log.info("Creating transaction record for membership payment");
+            Transaction transaction = Transaction.builder()
+                    .seller(null) // No seller for membership payments
+                    .buyer(user)
+                    .amount(plan.getPrice())
+                    .platformFee(BigDecimal.ZERO) // No platform fee for membership payments
+                    .feePercentage(BigDecimal.ZERO)
+                    .status(TransactionStatus.PAID) // Membership payment is already verified as paid
+                    .escrowStatus(EscrowStatus.CANCELLED) // No escrow needed for membership payments
+                    .payosOrderCode(orderCode)
+                    .paidAt(LocalDateTime.now())
+                    .build();
 
-        transactionRepository.save(transaction);
+            Transaction savedTransaction = transactionRepository.save(transaction);
+            log.info("Transaction created successfully with ID: {}", savedTransaction.getTransactionId());
+            
+        } catch (Exception transactionException) {
+            log.error("Database error during transaction creation: {}", transactionException.getMessage(), transactionException);
+            throw new RuntimeException("Database error during transaction creation: " + transactionException.getMessage(), transactionException);
+        }
     }
 
     /**
