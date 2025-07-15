@@ -20,31 +20,16 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
             LocalDateTime deliveredBefore,
             EscrowStatus escrowStatus
     );
-    List<Transaction> findByDisputeStatus(se.vestige_be.pojo.enums.DisputeStatus disputeStatus);
+
     List<Transaction> findByEscrowStatus(EscrowStatus escrowStatus);
-    List<Transaction> findByEscrowStatusAndCreatedAtBefore(EscrowStatus escrowStatus, LocalDateTime createdBefore);
-    List<Transaction> findBySellerAndCreatedAtAfter(se.vestige_be.pojo.User seller, LocalDateTime createdAfter);
-    
-    // Custom query to fetch transactions with all relationships loaded
-    @Query("SELECT DISTINCT t FROM Transaction t " +
-           "LEFT JOIN FETCH t.buyer " +
-           "LEFT JOIN FETCH t.seller " +
-           "LEFT JOIN FETCH t.orderItem oi " +
-           "LEFT JOIN FETCH oi.order " +
-           "LEFT JOIN FETCH oi.product " +
-           "WHERE t.transactionId IN :transactionIds")
-    List<Transaction> findByTransactionIdInWithAllRelationships(@Param("transactionIds") List<Long> transactionIds);
     
     List<Transaction> findByDisputeStatusNot(se.vestige_be.pojo.enums.DisputeStatus disputeStatus);
 
-    // Count methods for statistics
     long countByEscrowStatus(EscrowStatus escrowStatus);
     long countByDisputeStatus(se.vestige_be.pojo.enums.DisputeStatus disputeStatus);
-    
-    // New method for trust score calculations
+
     long countBySellerAndDisputeStatusAndCreatedAtAfter(se.vestige_be.pojo.User seller, se.vestige_be.pojo.enums.DisputeStatus disputeStatus, LocalDateTime date);
-    
-    // Enhanced method with proper eager loading for OrderMapper
+
     @Query("SELECT DISTINCT t FROM Transaction t " +
            "LEFT JOIN FETCH t.buyer " +
            "LEFT JOIN FETCH t.seller " +

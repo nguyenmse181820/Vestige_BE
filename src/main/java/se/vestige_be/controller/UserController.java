@@ -374,55 +374,6 @@ public class UserController {
     }
 
     @Operation(
-            summary = "[ADMIN] Bulk update user status",
-            description = "Admin-only endpoint to update account status or verification for multiple users at once. Useful for batch operations like bulk verification or status changes."
-    )
-    @ApiResponses(value = {
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "200",
-                    description = "Bulk update completed successfully"
-            ),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "400",
-                    description = "Invalid bulk update request"
-            ),
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "403",
-                    description = "Access denied - Admin role required"
-            )
-    })
-    @SecurityRequirement(name = "bearerAuth")
-    @PatchMapping("/admin/bulk-update")
-    @PreAuthorize("hasRole('ADMIN')")
-    public ResponseEntity<ApiResponse<String>> bulkUpdateUsers(
-            @Parameter(description = "List of user IDs to update", required = true)
-            @RequestParam List<Long> userIds,
-            
-            @Parameter(description = "New account status to apply")
-            @RequestParam(required = false) String accountStatus,
-            
-            @Parameter(description = "New verification status to apply")
-            @RequestParam(required = false) Boolean isVerified,
-            
-            @Parameter(hidden = true)
-            @AuthenticationPrincipal UserDetails adminDetails) {
-        
-        try {
-            userService.bulkUpdateUsers(userIds, accountStatus, isVerified);
-            return ResponseEntity.ok(ApiResponse.<String>builder()
-                    .status(HttpStatus.OK.toString())
-                    .message("Bulk user update completed successfully")
-                    .build());
-        } catch (Exception e) {
-            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
-                    .body(ApiResponse.<String>builder()
-                            .status(HttpStatus.INTERNAL_SERVER_ERROR.toString())
-                            .message("Failed to perform bulk update: " + e.getMessage())
-                            .build());
-        }
-    }
-
-    @Operation(
             summary = "[ADMIN] Get user activity summary",
             description = "Admin-only endpoint to get a summary of recent user activity across the platform including registrations, logins, and transactions."
     )

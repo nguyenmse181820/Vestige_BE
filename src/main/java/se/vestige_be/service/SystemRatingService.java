@@ -2,9 +2,12 @@ package se.vestige_be.service;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.request.RatingRequest;
+import se.vestige_be.dto.response.PagedResponse;
 import se.vestige_be.dto.response.RatingResponse;
 import se.vestige_be.dto.response.SystemRatingStatsResponse;
 import se.vestige_be.exception.ResourceNotFoundException;
@@ -54,8 +57,14 @@ public class SystemRatingService {
                 .build();
     }
 
-    // TODO: Implement admin methods for fetching all ratings and stats.
-    // public Page<RatingResponse> getAllRatings(Pageable pageable) { ... }
+    /**
+     * Get all system ratings with pagination
+     */
+    public PagedResponse<RatingResponse> getAllRatings(Pageable pageable) {
+        Page<SystemRating> ratings = systemRatingRepository.findAllWithUser(pageable);
+        Page<RatingResponse> ratingResponses = ratings.map(this::convertToDto);
+        return PagedResponse.of(ratingResponses);
+    }
 
     private RatingResponse convertToDto(SystemRating rating) {
         if (rating == null) {

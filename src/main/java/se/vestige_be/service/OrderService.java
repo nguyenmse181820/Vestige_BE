@@ -1395,48 +1395,6 @@ public String checkPaymentStatus(String paymentIntentId) {
         throw new BusinessLogicException("Failed to check payment status: " + e.getMessage());
     }
 }
-
-@Transactional
-public OrderDetailResponse simulatePaymentCompletion(Long orderId, Long buyerId, String paymentIntentId) {
-    log.warn("SIMULATING PAYMENT for order {} with paymentIntentId {}", orderId, paymentIntentId);
-
-    Order order = getOrderWithValidation(orderId, buyerId, true);
-
-    if (order.getStatus() != OrderStatus.PENDING) {
-        throw new BusinessLogicException("Order is not in pending status");
-    }
-
-    // Update order to PROCESSING status
-    order.setStripePaymentIntentId(paymentIntentId);
-    order.setStatus(OrderStatus.PROCESSING);
-    order.setPaidAt(LocalDateTime.now());
-
-    // Update order items to PROCESSING and update product status
-    order.getOrderItems().forEach(item -> {
-        if (item.getStatus() == OrderItemStatus.PENDING) {
-            item.setStatus(OrderItemStatus.PROCESSING);
-            item.setEscrowStatus(EscrowStatus.HOLDING);
-
-            Product product = item.getProduct();
-            product.setStatus(ProductStatus.SOLD);
-            product.setSoldAt(LocalDateTime.now());
-            productRepository.save(product);
-        }
-    });
-
-    // Update transaction escrow status
-    for (OrderItem item : order.getOrderItems()) {
-        Transaction transaction = getTransactionForOrderItem(item.getOrderItemId());
-        transaction.setEscrowStatus(EscrowStatus.HOLDING);
-        transactionRepository.save(transaction);
-    }
-
-    order = orderRepository.save(order);
-    log.warn("SIMULATED PAYMENT COMPLETED for order {}", orderId);
-
-    return convertToDetailResponse(order);
-}
-
 /**
  * Helper method to clean payment intent ID by removing client_secret part if present
  */
@@ -1692,26 +1650,6 @@ public void forceReleaseEscrow(Long transactionId, String notes, Long adminId) {
         throw new BusinessLogicException("Escrow release failed: " + e.getMessage());
     }
 }
-
-    /**
-     * Get transactions eligible for review by a buyer
-     * Returns delivered transactions that haven't been reviewed yet
-     */
-    @Transactional(readOnly = true)
-    public List<Map<String, Object>> getTransactionsEligibleForReview(Long buyerId) {
-        List<Transaction> transactions = transactionRepository.findAll((root, query, criteriaBuilder) -> {
-            var predicates = List.of(
-                criteriaBuilder.equal(root.get("buyer").get("userId"), buyerId),
-                criteriaBuilder.equal(root.get("status"), TransactionStatus.DELIVERED)
-            );
-            return criteriaBuilder.and(predicates.toArray(new jakarta.persistence.criteria.Predicate[0]));
-        });
-
-        return transactions.stream()
-                .filter(transaction -> !hasReview(transaction))
-                .map(this::mapTransactionForReview)
-                .collect(Collectors.toList());
-    }
 
     private boolean hasReview(Transaction transaction) {
         return !transaction.getReviews().isEmpty();

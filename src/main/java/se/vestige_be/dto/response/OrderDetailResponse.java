@@ -99,11 +99,9 @@ public class OrderDetailResponse {
     public static class TransactionInfo {
         private Long transactionId;
         private String trackingNumber;
-        private String trackingUrl;
         private LocalDateTime shippedAt;
         private LocalDateTime deliveredAt;
         private Boolean buyerProtectionEligible;
-        private Boolean canReview;
         private Boolean hasReview;
         private ReviewInfo review;
     }

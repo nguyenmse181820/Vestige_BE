@@ -39,15 +39,10 @@ public class MembershipController {
         }
     }
 
-    @GetMapping("/health")
-    @io.swagger.v3.oas.annotations.Operation(summary = "Health check for membership service")
-    public ResponseEntity<ApiResponse<String>> healthCheck() {
-        return ResponseEntity.ok(ApiResponse.success("Membership service is running", "OK"));
-    }
-
     @GetMapping("/current")
+    @PreAuthorize("hasRole('USER')")
     @io.swagger.v3.oas.annotations.Operation(summary = "Get current active membership")
-    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearer-auth")
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<ApiResponse<UserMembershipDTO>> getActiveMembership(@AuthenticationPrincipal UserDetails currentUser) {
         try {
             if (currentUser == null) {

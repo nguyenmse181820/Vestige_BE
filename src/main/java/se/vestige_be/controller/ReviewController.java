@@ -242,37 +242,10 @@ public class ReviewController {
             @PathVariable Long transactionId) {
 
         Optional<ReviewResponse> reviewOpt = reviewService.getReviewForTransaction(transactionId);
-        
-        if (reviewOpt.isPresent()) {
-            return ResponseEntity.ok(ApiResponse.<ReviewResponse>builder()
-                    .message("Review retrieved successfully")
-                    .data(reviewOpt.get())
-                    .build());
-        } else {
-            return ResponseEntity.notFound().build();
-        }
-    }
 
-    @Operation(
-            summary = "[DEBUG] Get transaction review debug information",
-            description = "Debug endpoint to understand why a transaction might not have a review. Provides detailed information about transaction status and review eligibility."
-    )
-    @ApiResponses(value = {
-            @io.swagger.v3.oas.annotations.responses.ApiResponse(
-                    responseCode = "200",
-                    description = "Debug information retrieved successfully"
-            )
-    })
-    @GetMapping("/transaction/{transactionId}/debug")
-    public ResponseEntity<ApiResponse<Map<String, Object>>> getTransactionReviewDebugInfo(
-            @Parameter(description = "Transaction ID", required = true, example = "1")
-            @PathVariable Long transactionId) {
-
-        Map<String, Object> debugInfo = reviewService.getTransactionReviewDebugInfo(transactionId);
-        
-        return ResponseEntity.ok(ApiResponse.<Map<String, Object>>builder()
-                .message("Transaction review debug information")
-                .data(debugInfo)
-                .build());
+        return reviewOpt.map(reviewResponse -> ResponseEntity.ok(ApiResponse.<ReviewResponse>builder()
+                .message("Review retrieved successfully")
+                .data(reviewResponse)
+                .build())).orElseGet(() -> ResponseEntity.notFound().build());
     }
 }

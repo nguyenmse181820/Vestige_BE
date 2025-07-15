@@ -348,47 +348,7 @@ public class OrderController {
         }
     }
 
-    @GetMapping("/{orderId}/tracking")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<Object>> getOrderTracking(
-            @PathVariable Long orderId,
-            @AuthenticationPrincipal UserDetails userDetails) {
 
-        User user = userService.findByUsername(userDetails.getUsername());
-
-        try {
-            OrderDetailResponse order = orderService.getOrderById(orderId, user.getUserId());
-
-            // Extract tracking information from order items
-            Object trackingInfo = order.getOrderItems().stream()
-                    .filter(item -> item.getTransaction() != null &&
-                            item.getTransaction().getTrackingNumber() != null)
-                    .map(item -> {
-                        var transaction = item.getTransaction();
-                        return java.util.Map.of(
-                                "itemId", item.getOrderItemId(),
-                                "productTitle", item.getProduct().getTitle(),
-                                "trackingNumber", transaction.getTrackingNumber(),
-                                "trackingUrl", transaction.getTrackingUrl() != null ?
-                                        transaction.getTrackingUrl() : "",
-                                "status", item.getStatus(),
-                                "shippedAt", transaction.getShippedAt(),
-                                "deliveredAt", transaction.getDeliveredAt()
-                        );
-                    })
-                    .toList();
-
-            return ResponseEntity.ok(ApiResponse.builder()
-                    .message("Order tracking retrieved successfully")
-                    .data(trackingInfo)
-                    .build());
-        } catch (RuntimeException e) {
-            return ResponseEntity.status(HttpStatus.NOT_FOUND)
-                    .body(ApiResponse.builder()
-                            .message(e.getMessage())
-                            .build());
-        }
-    }
 
     // ==================== ADMIN ENDPOINTS ====================
 
@@ -804,34 +764,6 @@ public class OrderController {
     }
 
     @Operation(
-            summary = "TEST ONLY: Simulate payment completion",
-            description = "Simulates payment completion for testing purposes - bypasses Stripe verification. DO NOT USE IN PRODUCTION!"
-    )
-    @SecurityRequirement(name = "bearerAuth")
-    @PostMapping("/{orderId}/simulate-payment")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<OrderDetailResponse>> simulatePaymentCompletion(
-            @Parameter(description = "Order ID", required = true, example = "1")
-            @PathVariable Long orderId,
-            
-            @Parameter(description = "Payment confirmation request containing Stripe payment intent ID")
-            @Valid @RequestBody PaymentConfirmationRequest request,
-            
-            @Parameter(hidden = true)
-            @AuthenticationPrincipal UserDetails userDetails) {
-
-        User user = userService.findByUsername(userDetails.getUsername());
-        
-        // SIMULATE payment completion without Stripe verification
-        OrderDetailResponse order = orderService.simulatePaymentCompletion(orderId, user.getUserId(), request.getStripePaymentIntentId());
-        
-        return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
-                .message("Payment simulated successfully (TEST MODE)")
-                .data(order)
-                .build());
-    }
-
-    @Operation(
             summary = "Admin: Trigger cleanup of expired orders",
             description = "Manually trigger cleanup of expired orders (normally runs automatically every 15 minutes)"
     )
@@ -1085,26 +1017,6 @@ public class OrderController {
         return ResponseEntity.ok(ApiResponse.<OrderDetailResponse>builder()
                 .message("Pickup requested. Our shipper will arrive shortly.")
                 .data(order)
-                .build());
-    }
-
-    @Operation(
-            summary = "Get transactions eligible for review",
-            description = "Get all completed transactions by the current user that are eligible for review (delivered but not yet reviewed)."
-    )
-    @SecurityRequirement(name = "bearerAuth")
-    @GetMapping("/eligible-for-review")
-    @PreAuthorize("hasRole('USER')")
-    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getTransactionsEligibleForReview(
-            @Parameter(hidden = true)
-            @AuthenticationPrincipal UserDetails userDetails) {
-
-        User user = userService.findByUsername(userDetails.getUsername());
-        List<Map<String, Object>> eligibleTransactions = orderService.getTransactionsEligibleForReview(user.getUserId());
-        
-        return ResponseEntity.ok(ApiResponse.<List<Map<String, Object>>>builder()
-                .message("Eligible transactions for review retrieved successfully")
-                .data(eligibleTransactions)
                 .build());
     }
 }

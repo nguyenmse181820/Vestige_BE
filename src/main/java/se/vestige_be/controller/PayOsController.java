@@ -17,18 +17,6 @@ public class PayOsController {
 
     private final PayOsService payOsService;
     private final MembershipService membershipService;
-
-    /**
-     * Health check endpoint for PayOS webhook
-     */
-    @GetMapping("/webhook/health")
-    public ResponseEntity<ApiResponse<String>> webhookHealthCheck() {
-        return ResponseEntity.ok(ApiResponse.<String>builder()
-                .message("PayOS webhook endpoint is healthy")
-                .data("OK")
-                .build());
-    }
-
     /**
      * Manual payment confirmation endpoint for frontend-initiated confirmation
      * Frontend calls this after user completes payment and gets redirected with payment params
@@ -53,21 +41,21 @@ public class PayOsController {
             boolean isPaymentVerified = payOsService.verifyPaymentStatus(orderCode);
             if (isPaymentVerified) {
                 try {
-                    log.info("Payment verified successfully for order code: {}. Activating subscription...", orderCode);
-                    membershipService.activateSubscription(String.valueOf(orderCode));
-                    log.info("Subscription activated successfully for order code: {}", orderCode);
+                    log.info("Payment verified successfully for order code: {}. Activating subscription...", orderCodeStr);
+                    membershipService.activateSubscription(orderCodeStr); // Pass original string to preserve leading zeros
+                    log.info("Subscription activated successfully for order code: {}", orderCodeStr);
                     
                     return ResponseEntity.ok(ApiResponse.<String>builder()
                             .message("Payment confirmed and subscription activated successfully")
-                            .data("Order code: " + orderCode)
+                            .data("Order code: " + orderCodeStr)
                             .build());
                             
                 } catch (Exception e) {
-                    log.error("CRITICAL: Failed to activate subscription for order code {}: {}", orderCode, e.getMessage(), e);
+                    log.error("CRITICAL: Failed to activate subscription for order code {}: {}", orderCodeStr, e.getMessage(), e);
                     return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                             .body(ApiResponse.<String>builder()
                                     .message("Payment verified but subscription activation failed: " + e.getMessage())
-                                    .data("Order code: " + orderCode)
+                                    .data("Order code: " + orderCodeStr)
                                     .build());
                 }
             } else {

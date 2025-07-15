@@ -20,6 +20,7 @@ import se.vestige_be.dto.response.PickupItemResponse;
 
 import jakarta.validation.Valid;
 import se.vestige_be.service.LogisticsService;
+import se.vestige_be.pojo.enums.OrderItemStatus;
 
 import java.util.List;
 
@@ -36,14 +37,20 @@ public class LogisticsController {
     private final LogisticsService logisticsService;
 
     @Operation(
-            summary = "Get items awaiting pickup",
-            description = "Retrieve all order items that are currently awaiting pickup by the Vestige Shipping team."
+            summary = "Get items by status",
+            description = "Retrieve all order items that match the specified status. " +
+                         "Supports all OrderItemStatus values: PENDING, PROCESSING, AWAITING_PICKUP, IN_WAREHOUSE, OUT_FOR_DELIVERY, DELIVERED, CANCELLED, REFUNDED. " +
+                         "Defaults to AWAITING_PICKUP for backward compatibility."
     )
     @ApiResponses(value = {
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "200",
                     description = "Items retrieved successfully",
                     content = @Content(schema = @Schema(implementation = List.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid status parameter"
             ),
             @io.swagger.v3.oas.annotations.responses.ApiResponse(
                     responseCode = "401",
@@ -55,14 +62,39 @@ public class LogisticsController {
             )
     })
     @SecurityRequirement(name = "bearerAuth")
-    @GetMapping("/pickups")
-    public ResponseEntity<ApiResponse<List<PickupItemResponse>>> getItemsAwaitingPickup() {
-        List<PickupItemResponse> items = logisticsService.getItemsAwaitingPickup();
+    @GetMapping
+    public ResponseEntity<ApiResponse<List<PickupItemResponse>>> getItemsByStatus(
+            @Parameter(description = "Order item status to filter by", 
+                      example = "AWAITING_PICKUP",
+                      schema = @Schema(allowableValues = {"PENDING", "PROCESSING", "AWAITING_PICKUP", "IN_WAREHOUSE", "OUT_FOR_DELIVERY", "DELIVERED", "CANCELLED", "REFUNDED"}))
+            @RequestParam(defaultValue = "AWAITING_PICKUP") String status) {
         
-        return ResponseEntity.ok(ApiResponse.<List<PickupItemResponse>>builder()
-                .message("Items awaiting pickup retrieved successfully")
-                .data(items)
-                .build());
+        try {
+            OrderItemStatus itemStatus = OrderItemStatus.valueOf(status.toUpperCase());
+            List<PickupItemResponse> items = logisticsService.getItemsByStatus(itemStatus);
+            
+            String message = switch (itemStatus) {
+                case PENDING -> "Pending items retrieved successfully";
+                case PROCESSING -> "Processing items retrieved successfully";
+                case AWAITING_PICKUP -> "Items awaiting pickup retrieved successfully";
+                case IN_WAREHOUSE -> "Items in warehouse retrieved successfully";
+                case OUT_FOR_DELIVERY -> "Items out for delivery retrieved successfully";
+                case DELIVERED -> "Delivered items retrieved successfully";
+                case CANCELLED -> "Cancelled items retrieved successfully";
+                case REFUNDED -> "Refunded items retrieved successfully";
+            };
+            
+            return ResponseEntity.ok(ApiResponse.<List<PickupItemResponse>>builder()
+                    .message(message)
+                    .data(items)
+                    .build());
+        } catch (IllegalArgumentException e) {
+            return ResponseEntity.badRequest()
+                    .body(ApiResponse.<List<PickupItemResponse>>builder()
+                            .message("Invalid status: " + status + ". Valid values are: PENDING, PROCESSING, AWAITING_PICKUP, IN_WAREHOUSE, OUT_FOR_DELIVERY, DELIVERED, CANCELLED, REFUNDED")
+                            .data(null)
+                            .build());
+        }
     }
 
     @Operation(

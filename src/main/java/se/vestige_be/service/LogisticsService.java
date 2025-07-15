@@ -12,11 +12,7 @@ import se.vestige_be.dto.response.PickupItemResponse;
 import se.vestige_be.dto.response.UserAddressResponse;
 import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
-import se.vestige_be.pojo.Order;
-import se.vestige_be.pojo.OrderItem;
-import se.vestige_be.pojo.PickupEvidence;
-import se.vestige_be.pojo.DeliveryEvidence;
-import se.vestige_be.pojo.Transaction;
+import se.vestige_be.pojo.*;
 import se.vestige_be.pojo.enums.EscrowStatus;
 import se.vestige_be.pojo.enums.OrderItemStatus;
 import se.vestige_be.pojo.enums.TransactionStatus;
@@ -46,31 +42,23 @@ public class LogisticsService {
     private final StatusHistoryService statusHistoryService;
     private final UserAddressService userAddressService;
 
-    public List<PickupItemResponse> getItemsAwaitingPickup() {
-        log.info("Retrieving all items awaiting pickup");
-        List<OrderItem> items = orderItemRepository.findByStatusWithDetails(OrderItemStatus.AWAITING_PICKUP);
+    public List<PickupItemResponse> getItemsByStatus(OrderItemStatus status) {
+        List<OrderItem> items = orderItemRepository.findByStatusWithDetails(status);
         return items.stream()
-                .map(this::convertToPickupItemResponse)
+                .map(this::convertToItemResponse)
                 .toList();
     }
 
     @Transactional
     public OrderDetailResponse confirmPickup(ConfirmPickupRequest request) {
-        log.info("Confirming pickup for order item: {} with {} evidence photos", 
-                request.getOrderItemId(), request.getPhotoUrls().size());
-        
-        // Find the transaction by order item ID
         Transaction transaction = transactionRepository.findByOrderItemOrderItemId(request.getOrderItemId())
                 .orElseThrow(() -> new ResourceNotFoundException("Transaction not found for order item: " + request.getOrderItemId()));
 
         OrderItem orderItem = transaction.getOrderItem();
-        
-        // Validate current status
         if (orderItem.getStatus() != OrderItemStatus.AWAITING_PICKUP) {
             throw new BusinessLogicException("Item must be in AWAITING_PICKUP status to confirm pickup. Current status: " + orderItem.getStatus());
         }
 
-        // Change status to IN_WAREHOUSE
         orderItem.setStatus(OrderItemStatus.IN_WAREHOUSE);
 
         // Record status change in history
@@ -238,39 +226,69 @@ public class LogisticsService {
         return orderService.convertToDetailResponse(order);
     }
 
-    private PickupItemResponse convertToPickupItemResponse(OrderItem orderItem) {
-        // Get the corresponding transaction for this order item
+    private PickupItemResponse convertToItemResponse(OrderItem orderItem) {
         Transaction transaction = transactionRepository.findByOrderItemOrderItemId(orderItem.getOrderItemId())
                 .orElse(null);
-        
-        // Get seller's default address for pickup location
+
         List<UserAddressResponse> sellerAddresses = userAddressService.getUserAddresses(orderItem.getSeller().getUserId());
-        UserAddressResponse defaultAddress = sellerAddresses.stream()
+        UserAddressResponse defaultSellerAddress = sellerAddresses.stream()
                 .filter(UserAddressResponse::getIsDefault)
                 .findFirst()
-                .orElse(sellerAddresses.isEmpty() ? null : sellerAddresses.get(0)); // Fallback to first address if no default
+                .orElse(sellerAddresses.isEmpty() ? null : sellerAddresses.getFirst());
+
+        UserAddressResponse shippingAddress = null;
+        if (orderItem.getOrder().getShippingAddress() != null) {
+            try {
+                UserAddress orderShippingAddress = orderItem.getOrder().getShippingAddress();
+                shippingAddress = UserAddressResponse.builder()
+                        .addressId(orderShippingAddress.getAddressId())
+                        .addressLine1(orderShippingAddress.getAddressLine1())
+                        .addressLine2(orderShippingAddress.getAddressLine2())
+                        .city(orderShippingAddress.getCity())
+                        .state(orderShippingAddress.getState())
+                        .postalCode(orderShippingAddress.getPostalCode())
+                        .country(orderShippingAddress.getCountry())
+                        .isDefault(orderShippingAddress.getIsDefault())
+                        .createdAt(orderShippingAddress.getCreatedAt())
+                        .build();
+            } catch (Exception e) {
+                log.warn("Failed to load shipping address for order {}: {}", orderItem.getOrder().getOrderId(), e.getMessage());
+            }
+        }
 
         return PickupItemResponse.builder()
                 .orderItemId(orderItem.getOrderItemId())
                 .orderId(orderItem.getOrder().getOrderId())
-                .orderCode("ORD-" + orderItem.getOrder().getOrderId()) // Generate order code
+                .orderCode("ORD-" + orderItem.getOrder().getOrderId())
                 .productId(orderItem.getProduct().getProductId())
-                .productName(orderItem.getProduct().getTitle()) // Use title field
+                .productName(orderItem.getProduct().getTitle())
                 .productSlug(orderItem.getProduct().getSlug())
-                .sellerId(orderItem.getSeller().getUserId())
-                .sellerUsername(orderItem.getSeller().getUsername())
-                .sellerFirstName(orderItem.getSeller().getFirstName())
-                .sellerLastName(orderItem.getSeller().getLastName())
-                
-                // Add seller address information for pickup
-                .sellerAddressId(defaultAddress != null ? defaultAddress.getAddressId() : null)
-                .sellerAddressLine1(defaultAddress != null ? defaultAddress.getAddressLine1() : null)
-                .sellerAddressLine2(defaultAddress != null ? defaultAddress.getAddressLine2() : null)
-                .sellerCity(defaultAddress != null ? defaultAddress.getCity() : null)
-                .sellerState(defaultAddress != null ? defaultAddress.getState() : null)
-                .sellerPostalCode(defaultAddress != null ? defaultAddress.getPostalCode() : null)
-                .sellerCountry(defaultAddress != null ? defaultAddress.getCountry() : null)
-                
+                .sellerInfo(PickupItemResponse.SellerInfo.builder()
+                        .sellerId(orderItem.getSeller().getUserId())
+                        .sellerUsername(orderItem.getSeller().getUsername())
+                        .sellerFirstName(orderItem.getSeller().getFirstName())
+                        .sellerLastName(orderItem.getSeller().getLastName())
+                        .sellerAddressId(defaultSellerAddress != null ? defaultSellerAddress.getAddressId() : null)
+                        .sellerAddressLine1(defaultSellerAddress != null ? defaultSellerAddress.getAddressLine1() : null)
+                        .sellerAddressLine2(defaultSellerAddress != null ? defaultSellerAddress.getAddressLine2() : null)
+                        .sellerCity(defaultSellerAddress != null ? defaultSellerAddress.getCity() : null)
+                        .sellerState(defaultSellerAddress != null ? defaultSellerAddress.getState() : null)
+                        .sellerPostalCode(defaultSellerAddress != null ? defaultSellerAddress.getPostalCode() : null)
+                        .sellerCountry(defaultSellerAddress != null ? defaultSellerAddress.getCountry() : null)
+                        .build())
+                .buyerInfo(PickupItemResponse.BuyerInfo.builder()
+                        .buyerId(orderItem.getOrder().getBuyer().getUserId())
+                        .buyerUsername(orderItem.getOrder().getBuyer().getUsername())
+                        .buyerFirstName(orderItem.getOrder().getBuyer().getFirstName())
+                        .buyerLastName(orderItem.getOrder().getBuyer().getLastName())
+                        .buyerAddressId(shippingAddress != null ? shippingAddress.getAddressId() : null)
+                        .buyerAddressLine1(shippingAddress != null ? shippingAddress.getAddressLine1() : null)
+                        .buyerAddressLine2(shippingAddress != null ? shippingAddress.getAddressLine2() : null)
+                        .buyerCity(shippingAddress != null ? shippingAddress.getCity() : null)
+                        .buyerState(shippingAddress != null ? shippingAddress.getState() : null)
+                        .buyerPostalCode(shippingAddress != null ? shippingAddress.getPostalCode() : null)
+                        .buyerCountry(shippingAddress != null ? shippingAddress.getCountry() : null)
+                        .build())
                 .price(orderItem.getPrice())
                 .platformFee(orderItem.getPlatformFee())
                 .feePercentage(orderItem.getFeePercentage())

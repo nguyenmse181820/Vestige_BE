@@ -39,7 +39,7 @@ public class BrandController {
     @PostMapping
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Create new brand", description = "Admin-only endpoint to create a new brand")
-    @SecurityRequirement(name = "bearer-auth")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<?> createBrand(@Valid @RequestBody BrandRequest brandRequest) {
         return ResponseEntity.status(HttpStatus.CREATED).body(
                 ObjectResponse.builder()
@@ -53,7 +53,7 @@ public class BrandController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Update brand", description = "Admin-only endpoint to update an existing brand")
-    @SecurityRequirement(name = "bearer-auth")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<?> updateBrand(@Valid @PathVariable Long id, @RequestBody BrandRequest request) {
         return ResponseEntity.ok(
                 ObjectResponse.builder()
@@ -67,7 +67,7 @@ public class BrandController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Delete brand", description = "Admin-only endpoint to delete a brand")
-    @SecurityRequirement(name = "bearer-auth")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<?> deleteBrand(@PathVariable Long id) {
         brandService.deleteBrand(id);
         return ResponseEntity.ok(

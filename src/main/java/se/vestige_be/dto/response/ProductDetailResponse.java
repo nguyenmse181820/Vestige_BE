@@ -14,7 +14,8 @@ import java.util.List;
 @Builder
 @NoArgsConstructor
 @AllArgsConstructor
-public class ProductDetailResponse {    private Long productId;
+public class ProductDetailResponse {
+    private Long productId;
     private String title;
     private String slug;
     private String description;

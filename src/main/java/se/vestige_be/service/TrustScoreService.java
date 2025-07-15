@@ -49,10 +49,10 @@ public class TrustScoreService {
     private int calculateOverallScoreForWindow(User user, int months) {
         double performanceScore = calculatePerformanceScore(user, months);
         double reviewScore = calculateReviewScore(user, months);
-        double profileScore = calculateProfileScore(user);
+//        double profileScore = calculateProfileScore(user);
 
-        // Apply weights from the proposal
-        double overallScore = (performanceScore * 0.60) + (reviewScore * 0.25) + (profileScore * 0.15);
+//        double overallScore = (performanceScore * 0.60) + (reviewScore * 0.25) + (profileScore * 0.15);
+        double overallScore = (performanceScore * 0.70) + (reviewScore * 0.35);
         return (int) Math.round(overallScore);
     }
 
@@ -80,7 +80,7 @@ public class TrustScoreService {
         List<Review> reviews = reviewRepository.findByReviewedUserAndCreatedAtAfter(user, since);
 
         if (reviews.isEmpty()) {
-            return 70; // Neutral score if no reviews
+            return 70;
         }
 
         double totalWeightedRating = 0;
@@ -100,23 +100,18 @@ public class TrustScoreService {
     private double calculateProfileScore(User user) {
         double score = 0;
         if (user.getIsVerified()) score += 50;
-        
-        // Check if user has Stripe account (assuming stripeAccountId indicates active status)
         if (user.getStripeAccountId() != null && !user.getStripeAccountId().isEmpty()) score += 25;
-        
-        // Check for profile completeness
         if (user.getProfilePictureUrl() != null && user.getBio() != null) score += 10;
 
-        // Account age bonus
         long monthsSinceCreation = ChronoUnit.MONTHS.between(user.getJoinedDate(), LocalDateTime.now());
         score += Math.min(monthsSinceCreation * 2, 15); // Capped at 15 points
 
         return score;
     }
 
-    private TrustTier determineTrustTier(int score, long totalCompletedSales, boolean isLegit) {
-        if (score >= 95 && totalCompletedSales >= 100 && isLegit) return TrustTier.ELITE_SELLER;
-        if (score >= 85 && totalCompletedSales >= 25 && isLegit) return TrustTier.PRO_SELLER;
+    private TrustTier determineTrustTier(int score, long totalCompletedSales, boolean isVerified) {
+        if (score >= 95 && totalCompletedSales >= 100) return TrustTier.ELITE_SELLER;
+        if (score >= 85 && totalCompletedSales >= 25) return TrustTier.PRO_SELLER;
         if (score >= 70 && totalCompletedSales >= 10) return TrustTier.RISING_SELLER;
         return TrustTier.NEW_SELLER;
     }

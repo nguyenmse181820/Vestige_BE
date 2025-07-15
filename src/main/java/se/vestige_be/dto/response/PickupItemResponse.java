@@ -18,20 +18,6 @@ public class PickupItemResponse {
     private Long productId;
     private String productName;
     private String productSlug;
-    private Long sellerId;
-    private String sellerUsername;
-    private String sellerFirstName;
-    private String sellerLastName;
-    
-    // Seller address information for pickup
-    private Long sellerAddressId;
-    private String sellerAddressLine1;
-    private String sellerAddressLine2;
-    private String sellerCity;
-    private String sellerState;
-    private String sellerPostalCode;
-    private String sellerCountry;
-    
     private BigDecimal price;
     private BigDecimal platformFee;
     private BigDecimal feePercentage;
@@ -39,4 +25,42 @@ public class PickupItemResponse {
     private EscrowStatus escrowStatus;
     private Instant createdAt;
     private Instant updatedAt;
+    private SellerInfo sellerInfo;
+    private BuyerInfo buyerInfo;
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class SellerInfo {
+        private Long sellerId;
+        private String sellerUsername;
+        private String sellerFirstName;
+        private String sellerLastName;
+        private Long sellerAddressId;
+        private String sellerAddressLine1;
+        private String sellerAddressLine2;
+        private String sellerCity;
+        private String sellerState;
+        private String sellerPostalCode;
+        private String sellerCountry;
+    }
+
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
+    public static class BuyerInfo {
+        private Long buyerId;
+        private String buyerUsername;
+        private String buyerFirstName;
+        private String buyerLastName;
+        private Long buyerAddressId;
+        private String buyerAddressLine1;
+        private String buyerAddressLine2;
+        private String buyerCity;
+        private String buyerState;
+        private String buyerPostalCode;
+        private String buyerCountry;
+    }
 }

@@ -56,6 +56,8 @@ public class SecurityConfig {
                                 "/api/auth/**",
                                 "/api/stripe/webhook",
                                 "/api/payos/webhook/health",
+                                "/api/ratings/stats",
+                                "/api/ratings/all",
                                 "/ws/**", "/chat/**",
                                 "/css/**", "/js/**", "/static/**",
                                 "/swagger-ui.html", "/swagger-ui/**",

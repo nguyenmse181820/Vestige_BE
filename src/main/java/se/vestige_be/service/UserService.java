@@ -155,7 +155,7 @@ public class UserService {
                 .sellerRating(BigDecimal.ZERO)
                 .sellerReviewsCount(0)
                 .successfulTransactions(0)
-                .isVerified(false)
+                .isVerified(true)
                 .trustScore(100)
                 .accountStatus("active")
                 .joinedDate(LocalDateTime.now())
@@ -495,29 +495,6 @@ public class UserService {
 
     private LocalDateTime getLastProductListingDateForUser(Long userId) {
         return productRepository.findLastListingDateBySellerUserId(userId);
-    }
-
-    @Transactional
-    public void bulkUpdateUsers(List<Long> userIds, String accountStatus, Boolean isVerified) {
-        List<User> users = userRepository.findAllById(userIds);
-        
-        for (User user : users) {
-            boolean updated = false;
-            
-            if (accountStatus != null) {
-                user.setAccountStatus(accountStatus);
-                updated = true;
-            }
-            
-            if (isVerified != null) {
-                user.setIsVerified(isVerified);
-                updated = true;
-            }
-            
-            if (updated) {
-                userRepository.save(user);
-            }
-        }
     }
 
     public Object getUserActivitySummary(int days) {

@@ -1,5 +1,7 @@
 package se.vestige_be.repository;
 
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.stereotype.Repository;
@@ -22,4 +24,8 @@ public interface SystemRatingRepository extends JpaRepository<SystemRating, Long
     
     @Query("SELECT COUNT(sr) FROM SystemRating sr WHERE sr.rating = :rating")
     Long countByRating(int rating);
+    
+    // Get all ratings with user information for pagination
+    @Query("SELECT sr FROM SystemRating sr LEFT JOIN FETCH sr.user ORDER BY sr.createdAt DESC")
+    Page<SystemRating> findAllWithUser(Pageable pageable);
 }

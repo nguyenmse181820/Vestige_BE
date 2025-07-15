@@ -32,6 +32,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             "/api/stripe/webhook",
             "/api/payos/webhook/health",
             "/api/ratings/stats",
+            "/api/ratings/all",
             "/ws/**",
             "/chat/**",
             "/swagger-ui/**",

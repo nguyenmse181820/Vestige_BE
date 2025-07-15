@@ -169,14 +169,14 @@ public class ReviewService {
         }
 
         Transaction transaction = transactionOpt.get();
-        
+
         // Must be the buyer
         if (!transaction.getBuyer().getUserId().equals(userId)) {
             return false;
         }
 
         // Transaction must be delivered
-        if (transaction.getStatus() != TransactionStatus.DELIVERED || 
+        if (transaction.getStatus() != TransactionStatus.DELIVERED ||
             transaction.getOrderItem().getStatus() != OrderItemStatus.DELIVERED) {
             return false;
         }
@@ -201,59 +201,6 @@ public class ReviewService {
 
         Optional<Review> reviewOpt = reviewRepository.findByTransaction(transactionOpt.get());
         return reviewOpt.map(this::convertToReviewResponse);
-    }
-
-    /**
-     * Debug method to get detailed information about transaction review status
-     */
-    public Map<String, Object> getTransactionReviewDebugInfo(Long transactionId) {
-        Map<String, Object> debugInfo = new HashMap<>();
-        
-        // Check if transaction exists
-        Optional<Transaction> transactionOpt = transactionRepository.findById(transactionId);
-        if (transactionOpt.isEmpty()) {
-            debugInfo.put("error", "Transaction not found");
-            debugInfo.put("transactionExists", false);
-            return debugInfo;
-        }
-        
-        Transaction transaction = transactionOpt.get();
-        debugInfo.put("transactionExists", true);
-        debugInfo.put("transactionId", transaction.getTransactionId());
-        debugInfo.put("transactionStatus", transaction.getStatus());
-        debugInfo.put("orderItemStatus", transaction.getOrderItem() != null ? 
-            transaction.getOrderItem().getStatus() : "NO_ORDER_ITEM");
-        debugInfo.put("buyerId", transaction.getBuyer() != null ? 
-            transaction.getBuyer().getUserId() : "NO_BUYER");
-        debugInfo.put("sellerId", transaction.getSeller() != null ? 
-            transaction.getSeller().getUserId() : "NO_SELLER");
-        
-        // Check if review exists
-        Optional<Review> reviewOpt = reviewRepository.findByTransaction(transaction);
-        debugInfo.put("reviewExists", reviewOpt.isPresent());
-        
-        if (reviewOpt.isPresent()) {
-            Review review = reviewOpt.get();
-            debugInfo.put("reviewId", review.getReviewId());
-            debugInfo.put("rating", review.getRating());
-            debugInfo.put("createdAt", review.getCreatedAt());
-            debugInfo.put("reviewerId", review.getReviewer() != null ? 
-                review.getReviewer().getUserId() : "NO_REVIEWER");
-        } else {
-            debugInfo.put("reviewMessage", "No review found for this transaction");
-            
-            // Check why no review exists
-            if (transaction.getStatus() != TransactionStatus.DELIVERED) {
-                debugInfo.put("cannotReviewReason", "Transaction not delivered (status: " + transaction.getStatus() + ")");
-            } else if (transaction.getOrderItem() != null && 
-                      transaction.getOrderItem().getStatus() != OrderItemStatus.DELIVERED) {
-                debugInfo.put("cannotReviewReason", "Order item not delivered (status: " + transaction.getOrderItem().getStatus() + ")");
-            } else {
-                debugInfo.put("cannotReviewReason", "Transaction is delivered but buyer hasn't created a review yet");
-            }
-        }
-        
-        return debugInfo;
     }
 
     /**

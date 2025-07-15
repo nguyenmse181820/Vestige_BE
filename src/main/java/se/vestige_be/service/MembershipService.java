@@ -18,7 +18,9 @@ import se.vestige_be.repository.*;
 import java.math.BigDecimal;
 import java.time.LocalDateTime;
 import java.util.List;
+import java.util.Objects;
 import java.util.Optional;
+import java.util.stream.Collectors;
 
 @Service
 @RequiredArgsConstructor
@@ -53,12 +55,54 @@ public class MembershipService {
         User user = userRepository.findByUsername(currentUserDetails.getUsername())
                 .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
 
-        if (userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE).isPresent()) {
-            throw new BusinessLogicException("User already has an active subscription.");
-        }
-
         MembershipPlan plan = membershipPlanRepository.findById(planId)
                 .orElseThrow(() -> new BusinessLogicException("Membership plan not found."));
+
+        Optional<UserMembership> activeMembershipOpt = userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE);
+
+        if (activeMembershipOpt.isPresent()) {
+            UserMembership activeMembership = activeMembershipOpt.get();
+            MembershipPlan oldPlan = activeMembership.getPlan();
+
+            // SCENARIO 1: EXTENSION (User buys the same plan again)
+            if (plan.getPlanId().equals(oldPlan.getPlanId())) {
+                log.info("User {} is extending their current plan: {}", user.getUsername(), plan.getName());
+                
+                // NOTE: We do NOT touch the activeMembership here. It remains ACTIVE.
+                // Create a new record to track the extension payment
+                PayOsService.CreatePaymentLinkResult paymentResult = payOsService.createPaymentLink(user, plan);
+                
+                UserMembership extensionMembership = UserMembership.builder()
+                        .user(user)
+                        .plan(plan)
+                        .status(MembershipStatus.PENDING_EXTEND) // Awaiting payment
+                        .boostsRemaining(plan.getBoostsPerMonth())
+                        .payosSubscriptionId(paymentResult.getOrderCode())
+                        .build();
+                
+                userMembershipRepository.save(extensionMembership);
+                
+                log.info("Created PENDING_EXTEND membership for user {} with order code: {}", 
+                        user.getUsername(), paymentResult.getOrderCode());
+                
+                return paymentResult.getCheckoutUrl(); // Return URL, leaving the active plan untouched
+            }
+            // SCENARIO 2: UPGRADE (User buys a more expensive plan)
+            else if (plan.getPrice().compareTo(oldPlan.getPrice()) > 0) {
+                log.info("User {} is upgrading from {} to {}", user.getUsername(), oldPlan.getName(), plan.getName());
+                
+                activeMembership.setStatus(MembershipStatus.CANCELLED);
+                activeMembership.setEndDate(LocalDateTime.now());
+                userMembershipRepository.save(activeMembership);
+                
+                log.info("Cancelled existing membership for user {} to upgrade from {} to {}", 
+                        user.getUsername(), oldPlan.getName(), plan.getName());
+            }
+            // SCENARIO 3: DOWNGRADE (Not allowed)
+            else {
+                throw new BusinessLogicException("Downgrading or subscribing to a cheaper plan is not allowed. Please manage your current subscription.");
+            }
+        }
 
         if (plan.getRequiredTrustTier() != null) {
             if (user.getTrustTier() == null || user.getTrustTier().getLevel() < plan.getRequiredTrustTier().getLevel()) {
@@ -66,23 +110,20 @@ public class MembershipService {
             }
         }
 
-        // Create PayOS payment link
         PayOsService.CreatePaymentLinkResult paymentResult = payOsService.createPaymentLink(user, plan);
 
-        // Create pending membership record with order code for tracking
         UserMembership userMembership = UserMembership.builder()
                 .user(user)
                 .plan(plan)
                 .status(MembershipStatus.PENDING)
                 .boostsRemaining(0)
-                .payosSubscriptionId(paymentResult.getOrderCode()) // Temporary storage for order code
+                .payosSubscriptionId(paymentResult.getOrderCode())
                 .build();
         userMembershipRepository.save(userMembership);
 
         log.info("Created pending membership for user {} with order code: {}", 
                 user.getUsername(), paymentResult.getOrderCode());
 
-        // Return the checkout URL for the frontend to redirect to
         return paymentResult.getCheckoutUrl();
     }
 
@@ -93,9 +134,6 @@ public class MembershipService {
 
         UserMembership activeMembership = userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE)
                 .orElseThrow(() -> new BusinessLogicException("No active subscription found."));
-
-        // PayOS subscriptions are handled differently - no need to cancel remotely
-        // Just update the local membership status
         activeMembership.setStatus(MembershipStatus.CANCELLED);
         activeMembership.setEndDate(LocalDateTime.now());
         userMembershipRepository.save(activeMembership);
@@ -139,20 +177,25 @@ public class MembershipService {
         return productBoostRepository.save(productBoost);
     }
 
-    /**
-     * Activates subscription when PayOS payment is successful
-     * Called by PayOsController webhook handler
-     */
     @Transactional
     public void activateSubscription(String orderCode) {
         Optional<UserMembership> membershipOpt = userMembershipRepository.findByPayosSubscriptionId(orderCode);
         
         if (membershipOpt.isEmpty()) {
-            log.error("Could not find PENDING membership for order code: {}. Checking all memberships...", orderCode);
+            String paddedOrderCode = String.format("%08d", Long.parseLong(orderCode));
+            membershipOpt = userMembershipRepository.findByPayosSubscriptionId(paddedOrderCode);
+            
+            if (membershipOpt.isPresent()) {
+                log.info("Found membership with padded order code: {} (original: {})", paddedOrderCode, orderCode);
+            }
+        }
+        
+        if (membershipOpt.isEmpty()) {
+            log.error("Could not find PENDING membership for order code: {} (also tried with leading zeros). Checking all memberships...", orderCode);
             
             // Debug: List all pending memberships
             List<UserMembership> allPendingMemberships = userMembershipRepository.findAll().stream()
-                    .filter(m -> m.getStatus() == MembershipStatus.PENDING)
+                    .filter(m -> m.getStatus() == MembershipStatus.PENDING || m.getStatus() == MembershipStatus.PENDING_EXTEND)
                     .toList();
 
             log.info("Found {} pending memberships:", allPendingMemberships.size());
@@ -166,54 +209,114 @@ public class MembershipService {
         
         UserMembership membership = membershipOpt.get();
 
-        if (membership.getStatus() != MembershipStatus.PENDING) {
-            return;
+        if (membership.getStatus() == MembershipStatus.PENDING) {
+            MembershipPlan plan = membership.getPlan();
+            User user = membership.getUser();
+
+            // Update membership details
+            try {
+                membership.setStatus(MembershipStatus.ACTIVE);
+                membership.setPayosSubscriptionId(orderCode); // Keep the order code as subscription ID
+                membership.setBoostsRemaining(plan.getBoostsPerMonth());
+                membership.setStartDate(LocalDateTime.now());
+                membership.setEndDate(LocalDateTime.now().plusMonths(1));
+
+                log.info("Saving membership with ID: {}, Status: {}, PayOS ID: {}", 
+                        membership.getMembershipId(), membership.getStatus(), membership.getPayosSubscriptionId());
+                
+                userMembershipRepository.save(membership);
+                log.info("Membership updated successfully in database");
+                
+            } catch (Exception dbException) {
+                log.error("Database error during membership update: {}", dbException.getMessage(), dbException);
+                throw new RuntimeException("Database error during membership update: " + dbException.getMessage(), dbException);
+            }
+
+            // Create transaction record for this payment
+            try {
+                log.info("Creating transaction record for membership payment");
+                Transaction transaction = Transaction.builder()
+                        .seller(null) // No seller for membership payments
+                        .buyer(user)
+                        .amount(plan.getPrice())
+                        .platformFee(BigDecimal.ZERO) // No platform fee for membership payments
+                        .feePercentage(BigDecimal.ZERO)
+                        .status(TransactionStatus.PAID) // Membership payment is already verified as paid
+                        .escrowStatus(EscrowStatus.CANCELLED) // No escrow needed for membership payments
+                        .payosOrderCode(orderCode)
+                        .paidAt(LocalDateTime.now())
+                        .build();
+
+                Transaction savedTransaction = transactionRepository.save(transaction);
+                log.info("Transaction created successfully with ID: {}", savedTransaction.getTransactionId());
+                
+            } catch (Exception transactionException) {
+                log.error("Database error during transaction creation: {}", transactionException.getMessage(), transactionException);
+                throw new RuntimeException("Database error during transaction creation: " + transactionException.getMessage(), transactionException);
+            }
         }
+        else if (membership.getStatus() == MembershipStatus.PENDING_EXTEND) {
+            User user = membership.getUser();
+            MembershipPlan plan = membership.getPlan();
 
-        MembershipPlan plan = membership.getPlan();
-        User user = membership.getUser();
+            // Find the active membership (current plan)
+            UserMembership activeMembership = userMembershipRepository
+                    .findByUserAndStatus(user, MembershipStatus.ACTIVE)
+                    .orElseThrow(() -> new BusinessLogicException("Cannot find an active plan to extend."));
 
-        // Update membership details
-        try {
-            log.info("Updating membership status to ACTIVE for order code: {}", orderCode);
-            membership.setStatus(MembershipStatus.ACTIVE);
-            membership.setPayosSubscriptionId(orderCode); // Keep the order code as subscription ID
+            // Check if there are any existing queued plans
+            List<UserMembership> queuedPlans = userMembershipRepository.findQueuedPlansByUser(user);
+
+            // Determine the start date for the new queued plan
+            LocalDateTime newStartDate;
+            if (queuedPlans.isEmpty()) {
+                // No queued plans exist, start after the active plan ends
+                newStartDate = activeMembership.getEndDate();
+                log.info("No queued plans found for user {}. New plan will start after active plan ends: {}", 
+                        user.getUsername(), newStartDate);
+            } else {
+                // Since queuedPlans are ordered by end date descending, the first one has the latest end date
+                newStartDate = queuedPlans.get(0).getEndDate();
+                log.info("Found {} queued plans for user {}. New plan will start after latest queued plan ends: {}", 
+                        queuedPlans.size(), user.getUsername(), newStartDate);
+            }
+
+            // Set the membership details
+            membership.setStatus(MembershipStatus.QUEUED);
+            membership.setPayosSubscriptionId(orderCode);
             membership.setBoostsRemaining(plan.getBoostsPerMonth());
-            membership.setStartDate(LocalDateTime.now());
-            membership.setEndDate(LocalDateTime.now().plusMonths(1));
-
-            log.info("Saving membership with ID: {}, Status: {}, PayOS ID: {}", 
-                    membership.getMembershipId(), membership.getStatus(), membership.getPayosSubscriptionId());
+            membership.setStartDate(newStartDate);
+            membership.setEndDate(newStartDate.plusMonths(1)); // Default to 1 month duration
             
             userMembershipRepository.save(membership);
-            log.info("Membership updated successfully in database");
             
-        } catch (Exception dbException) {
-            log.error("Database error during membership update: {}", dbException.getMessage(), dbException);
-            throw new RuntimeException("Database error during membership update: " + dbException.getMessage(), dbException);
+            log.info("Extension membership queued with ID: {}, will start: {}, will end: {}", 
+                    membership.getMembershipId(), membership.getStartDate(), membership.getEndDate());
+
+            try {
+                Transaction transaction = Transaction.builder()
+                        .seller(null)
+                        .buyer(user)
+                        .amount(plan.getPrice())
+                        .platformFee(BigDecimal.ZERO)
+                        .feePercentage(BigDecimal.ZERO)
+                        .status(TransactionStatus.PAID)
+                        .escrowStatus(EscrowStatus.CANCELLED)
+                        .payosOrderCode(orderCode)
+                        .paidAt(LocalDateTime.now())
+                        .build();
+
+                Transaction savedTransaction = transactionRepository.save(transaction);
+                log.info("Extension transaction created successfully with ID: {}", savedTransaction.getTransactionId());
+                
+            } catch (Exception transactionException) {
+                log.error("Database error during extension transaction creation: {}", transactionException.getMessage(), transactionException);
+                throw new RuntimeException("Database error during extension transaction creation: " + transactionException.getMessage(), transactionException);
+            }
         }
-
-        // Create transaction record for this payment
-        try {
-            log.info("Creating transaction record for membership payment");
-            Transaction transaction = Transaction.builder()
-                    .seller(null) // No seller for membership payments
-                    .buyer(user)
-                    .amount(plan.getPrice())
-                    .platformFee(BigDecimal.ZERO) // No platform fee for membership payments
-                    .feePercentage(BigDecimal.ZERO)
-                    .status(TransactionStatus.PAID) // Membership payment is already verified as paid
-                    .escrowStatus(EscrowStatus.CANCELLED) // No escrow needed for membership payments
-                    .payosOrderCode(orderCode)
-                    .paidAt(LocalDateTime.now())
-                    .build();
-
-            Transaction savedTransaction = transactionRepository.save(transaction);
-            log.info("Transaction created successfully with ID: {}", savedTransaction.getTransactionId());
-            
-        } catch (Exception transactionException) {
-            log.error("Database error during transaction creation: {}", transactionException.getMessage(), transactionException);
-            throw new RuntimeException("Database error during transaction creation: " + transactionException.getMessage(), transactionException);
+        else {
+            log.warn("Membership with order code {} has unexpected status: {}", orderCode, membership.getStatus());
+            return;
         }
     }
 
@@ -227,9 +330,21 @@ public class MembershipService {
         
         if (membershipOpt.isPresent()) {
             UserMembership membership = membershipOpt.get();
-            membership.setStatus(MembershipStatus.CANCELLED);
-            membership.setEndDate(LocalDateTime.now());
-            userMembershipRepository.save(membership);
+            
+            // Only cancel if the membership is in a pending state
+            if (membership.getStatus() == MembershipStatus.PENDING || 
+                membership.getStatus() == MembershipStatus.PENDING_EXTEND) {
+                
+                membership.setStatus(MembershipStatus.CANCELLED);
+                membership.setEndDate(LocalDateTime.now());
+                userMembershipRepository.save(membership);
+                
+                log.info("Cancelled membership due to failed payment. Order code: {}, Status was: {}", 
+                        orderCode, membership.getStatus());
+            } else {
+                log.warn("Payment failed for order code: {}, but membership status is: {} - not cancelling", 
+                        orderCode, membership.getStatus());
+            }
         } else {
             log.warn("No membership found for failed payment with order code: {}", orderCode);
         }

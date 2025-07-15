@@ -634,7 +634,8 @@ public class ProductService {
                         .displayOrder(img.getDisplayOrder())
                         .active(img.getActive())
                         .build())
-                .collect(Collectors.toList());        return ProductDetailResponse.builder()
+                .collect(Collectors.toList());
+        return ProductDetailResponse.builder()
                 .productId(product.getProductId())
                 .title(product.getTitle())
                 .slug(product.getSlug())

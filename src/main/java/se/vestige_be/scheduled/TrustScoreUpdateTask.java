@@ -17,8 +17,6 @@ public class TrustScoreUpdateTask {
 
     @Scheduled(cron = "0 0 0 * * ?")
     public void updateAllUserTrustScores() {
-        log.info("Starting nightly Trust Score update task.");
         userRepository.findAll().forEach(trustScoreService::updateUserTrustScore);
-        log.info("Finished nightly Trust Score update task.");
     }
 }

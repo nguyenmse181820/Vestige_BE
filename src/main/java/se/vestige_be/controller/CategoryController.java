@@ -50,7 +50,7 @@ public class CategoryController {
     @PostMapping()
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Create new category", description = "Admin-only endpoint to create a new category")
-    @SecurityRequirement(name = "bearer-auth")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<?> createNewCategory(
             @RequestBody CategoryRequest request
     ) {
@@ -70,7 +70,7 @@ public class CategoryController {
     @PatchMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Update category", description = "Admin-only endpoint to update an existing category")
-    @SecurityRequirement(name = "bearer-auth")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<?> updateCategory(@Valid @PathVariable Long id, @RequestBody CategoryRequest request) {
         return ResponseEntity.ok(
                 ObjectResponse.builder()
@@ -86,7 +86,7 @@ public class CategoryController {
     @DeleteMapping("/{id}")
     @PreAuthorize("hasRole('ADMIN')")
     @Operation(summary = "Delete category", description = "Admin-only endpoint to delete a category")
-    @SecurityRequirement(name = "bearer-auth")
+    @SecurityRequirement(name = "bearerAuth")
     public ResponseEntity<?> deleteCategory(@PathVariable Long id) {
         categoryService.deleteCategory(id);
         return ResponseEntity.ok(

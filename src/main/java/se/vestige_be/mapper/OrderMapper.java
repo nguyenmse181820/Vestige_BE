@@ -9,6 +9,7 @@ import se.vestige_be.pojo.*;
 import se.vestige_be.pojo.enums.OrderItemStatus;
 import se.vestige_be.pojo.enums.TransactionStatus;
 import se.vestige_be.repository.TransactionRepository;
+import se.vestige_be.repository.ReviewRepository;
 
 import java.math.BigDecimal;
 import java.util.ArrayList;
@@ -28,6 +29,7 @@ import java.util.stream.Collectors;
 public class OrderMapper {
     
     private final TransactionRepository transactionRepository;
+    private final ReviewRepository reviewRepository;
     
     /**
      * Convert order entity to detailed response
@@ -186,6 +188,7 @@ public class OrderMapper {
         }
         
         return OrderListResponse.OrderItemSummary.builder()
+            .orderItemId(orderItem.getOrderItemId())
             .productId(orderItem.getProduct().getProductId())
             .productTitle(orderItem.getProduct().getTitle())
             .productImage(primaryImageUrl)
@@ -259,7 +262,6 @@ public class OrderMapper {
             log.warn("OrderItem is null when converting to transaction info");
             return OrderDetailResponse.TransactionInfo.builder()
                 .transactionId(null)
-                .canReview(false)
                 .hasReview(false)
                 .buyerProtectionEligible(false)
                 .build();
@@ -270,82 +272,46 @@ public class OrderMapper {
             log.warn("Transaction not found for order item: {}", orderItem.getOrderItemId());
             return OrderDetailResponse.TransactionInfo.builder()
                 .transactionId(null)
-                .canReview(false)
                 .hasReview(false)
                 .buyerProtectionEligible(false)
                 .build();
         }
-        
-        // Check if transaction can be reviewed
-        boolean canReview = canTransactionBeReviewed(transaction);
-        
-        // Get existing review if any - safely handle lazy loading
+        // Get existing review if any - using repository to avoid lazy loading issues
         boolean hasReview = false;
         OrderDetailResponse.ReviewInfo reviewInfo = null;
+        
         try {
-            List<Review> reviews = transaction.getReviews();
-            if (reviews != null && !reviews.isEmpty()) {
+            // Check if there's a review for this transaction
+            Optional<Review> reviewOpt = reviewRepository.findByTransaction(transaction);
+            
+            if (reviewOpt.isPresent()) {
                 hasReview = true;
-                Review review = reviews.get(0);
+                Review review = reviewOpt.get();
+                
                 reviewInfo = OrderDetailResponse.ReviewInfo.builder()
-                        .reviewId(review.getReviewId())
-                        .rating(review.getRating())
-                        .comment(review.getComment())
-                        .authenticityRating(review.getAuthenticityRating())
-                        .authenticityComment(review.getAuthenticityComment())
-                        .createdAt(review.getCreatedAt())
-                        .build();
+                    .reviewId(review.getReviewId())
+                    .rating(review.getRating())
+                    .comment(review.getComment())
+                    .authenticityRating(review.getAuthenticityRating())
+                    .authenticityComment(review.getAuthenticityComment())
+                    .createdAt(review.getCreatedAt())
+                    .build();
             }
         } catch (Exception e) {
-            log.warn("Failed to load reviews for transaction {}: {}", transaction.getTransactionId(), e.getMessage());
+            log.warn("Failed to load review for transaction {}: {}", transaction.getTransactionId(), e.getMessage());
             hasReview = false;
+            reviewInfo = null;
         }
         
         return OrderDetailResponse.TransactionInfo.builder()
             .transactionId(transaction.getTransactionId())
             .trackingNumber(transaction.getTrackingNumber())
-            .trackingUrl(transaction.getTrackingUrl())
             .shippedAt(transaction.getShippedAt())
             .deliveredAt(transaction.getDeliveredAt())
             .buyerProtectionEligible(transaction.getBuyerProtectionEligible() != null ? transaction.getBuyerProtectionEligible() : true)
-            .canReview(canReview)
             .hasReview(hasReview)
             .review(reviewInfo)
             .build();
-    }
-    
-    /**
-     * Check if a transaction can be reviewed
-     */
-    private boolean canTransactionBeReviewed(Transaction transaction) {
-        if (transaction == null) {
-            return false;
-        }
-        
-        // Must be delivered
-        if (transaction.getStatus() != TransactionStatus.DELIVERED) {
-            return false;
-        }
-        
-        // Check order item status as well
-        OrderItem orderItem = transaction.getOrderItem();
-        if (orderItem == null || orderItem.getStatus() != OrderItemStatus.DELIVERED) {
-            return false;
-        }
-        
-        // Must not have existing review - safely handle lazy loading
-        try {
-            List<Review> reviews = transaction.getReviews();
-            if (reviews != null && !reviews.isEmpty()) {
-                return false;
-            }
-        } catch (Exception e) {
-            log.warn("Failed to check reviews for transaction {}: {}", transaction.getTransactionId(), e.getMessage());
-            // If we can't check reviews, assume false for safety
-            return false;
-        }
-        
-        return true;
     }
     
     /**
@@ -432,15 +398,20 @@ public class OrderMapper {
         }
         
         try {
-            // Try enhanced method first for better performance
-            Optional<Transaction> transactionOpt = transactionRepository.findByOrderItemOrderItemIdWithAllRelationships(orderItemId);
+            log.debug("Looking for transaction for order item ID: {}", orderItemId);
+            
+            // Use the basic method first for reliability
+            Optional<Transaction> transactionOpt = transactionRepository.findByOrderItemOrderItemId(orderItemId);
+            
             if (transactionOpt.isPresent()) {
-                return transactionOpt.get();
+                Transaction transaction = transactionOpt.get();
+                log.debug("Found transaction {} for order item {}", transaction.getTransactionId(), orderItemId);
+                return transaction;
+            } else {
+                log.warn("No transaction found for order item {}", orderItemId);
+                return null;
             }
             
-            // Fallback to basic method
-            return transactionRepository.findByOrderItemOrderItemId(orderItemId)
-                    .orElse(null);
         } catch (Exception e) {
             log.error("Failed to get transaction for order item {}: {}", orderItemId, e.getMessage());
             return null;
