@@ -292,8 +292,6 @@ public class OrderMapper {
                     .reviewId(review.getReviewId())
                     .rating(review.getRating())
                     .comment(review.getComment())
-                    .authenticityRating(review.getAuthenticityRating())
-                    .authenticityComment(review.getAuthenticityComment())
                     .createdAt(review.getCreatedAt())
                     .build();
             }

@@ -27,13 +27,4 @@ public class CreateReviewRequest {
     @Size(max = 1000, message = "Comment cannot exceed 1000 characters")
     @Schema(description = "Optional comment about the seller", example = "Great seller, fast shipping and item as described!")
     private String comment;
-
-    @Min(value = 1, message = "Authenticity rating must be between 1 and 5")
-    @Max(value = 5, message = "Authenticity rating must be between 1 and 5")
-    @Schema(description = "Optional authenticity rating for the product (1-5 stars)", example = "5")
-    private Integer authenticityRating;
-
-    @Size(max = 500, message = "Authenticity comment cannot exceed 500 characters")
-    @Schema(description = "Optional comment about product authenticity", example = "Product appears authentic and in excellent condition")
-    private String authenticityComment;
 }

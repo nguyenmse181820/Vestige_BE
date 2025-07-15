@@ -71,6 +71,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             UserDetails userDetails = this.userDetailsService.loadUserByUsername(username);
+            
             if (jwtTokenUtil.validateToken(jwt, userDetails)) {
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         userDetails,
@@ -108,15 +109,16 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         
         // Special handling for product endpoints - only specific ones should be public
         if (requestPath.startsWith("/api/products/")) {
-            // Public product endpoints
-            if (requestPath.matches("/api/products/?$") ||  // GET /api/products
+            // Public product endpoints - ONLY for GET requests
+            if ("GET".equals(request.getMethod()) && (
+                requestPath.matches("/api/products/?$") ||  // GET /api/products
                 requestPath.matches("/api/products/\\d+$") ||  // GET /api/products/{id}
                 requestPath.matches("/api/products/slug/[^/]+$") ||  // GET /api/products/slug/{slug}
                 requestPath.matches("/api/products/slug-available/[^/]+$") ||  // GET /api/products/slug-available/{slug}
-                requestPath.equals("/api/products/top-viewed")) {  // GET /api/products/top-viewed
+                requestPath.equals("/api/products/top-viewed"))) {  // GET /api/products/top-viewed
                 return true;
             }
-            // All other product endpoints are protected
+            // All other product endpoints (POST, PATCH, PUT, DELETE) are protected
             return false;
         }
         

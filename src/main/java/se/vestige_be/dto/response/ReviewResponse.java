@@ -16,8 +16,6 @@ public class ReviewResponse {
     private Long reviewId;
     private Integer rating;
     private String comment;
-    private Integer authenticityRating;
-    private String authenticityComment;
     private LocalDateTime createdAt;
     
     // Transaction info

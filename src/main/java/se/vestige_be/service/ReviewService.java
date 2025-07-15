@@ -82,8 +82,6 @@ public class ReviewService {
                 .reviewedUser(transaction.getSeller())
                 .rating(request.getRating())
                 .comment(request.getComment())
-                .authenticityRating(request.getAuthenticityRating())
-                .authenticityComment(request.getAuthenticityComment())
                 .build();
 
         review = reviewRepository.save(review);
@@ -300,8 +298,6 @@ public class ReviewService {
                 .reviewId(review.getReviewId())
                 .rating(review.getRating())
                 .comment(review.getComment())
-                .authenticityRating(review.getAuthenticityRating())
-                .authenticityComment(review.getAuthenticityComment())
                 .createdAt(review.getCreatedAt())
                 .transactionId(transaction != null ? transaction.getTransactionId() : null)
                 .transactionAmount(transaction != null ? transaction.getAmount() : null)

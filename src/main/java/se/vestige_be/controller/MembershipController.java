@@ -10,6 +10,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import se.vestige_be.dto.UserMembershipDTO;
 import se.vestige_be.dto.response.ApiResponse;
+import se.vestige_be.dto.response.UserSubscriptionStatusResponse;
 import se.vestige_be.pojo.MembershipPlan;
 import se.vestige_be.pojo.UserMembership;
 import se.vestige_be.service.MembershipService;
@@ -60,6 +61,26 @@ public class MembershipController {
                 currentUser != null ? currentUser.getUsername() : "unknown", e.getMessage(), e);
             return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                     .body(ApiResponse.error("Failed to retrieve membership information: " + e.getMessage()));
+        }
+    }
+
+    @GetMapping("/my-subscription")
+    @PreAuthorize("hasRole('USER')")
+    @io.swagger.v3.oas.annotations.Operation(summary = "Get full membership status (active and queued)")
+    @io.swagger.v3.oas.annotations.security.SecurityRequirement(name = "bearerAuth")
+    public ResponseEntity<ApiResponse<UserSubscriptionStatusResponse>> getFullMembershipStatus(@AuthenticationPrincipal UserDetails currentUser) {
+        try {
+            if (currentUser == null) {
+                return ResponseEntity.status(HttpStatus.UNAUTHORIZED)
+                        .body(ApiResponse.error("Authentication required."));
+            }
+            UserSubscriptionStatusResponse status = membershipService.getFullSubscriptionStatus(currentUser);
+            return ResponseEntity.ok(ApiResponse.success("Full subscription status retrieved successfully.", status));
+        } catch (Exception e) {
+            log.error("Error retrieving full membership status for user {}: {}",
+                    currentUser != null ? currentUser.getUsername() : "unknown", e.getMessage(), e);
+            return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
+                    .body(ApiResponse.error("Failed to retrieve subscription status: " + e.getMessage()));
         }
     }
 

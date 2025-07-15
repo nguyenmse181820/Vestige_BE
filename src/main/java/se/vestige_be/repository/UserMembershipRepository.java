@@ -26,6 +26,6 @@ public interface UserMembershipRepository extends JpaRepository<UserMembership, 
     List<UserMembership> findQueuedPlansToActivate(@Param("date") LocalDateTime date);
     
     // Query to find all queued plans for a specific user, ordered by end date descending
-    @Query("SELECT m FROM UserMembership m WHERE m.user = :user AND m.status = 'QUEUED' ORDER BY m.endDate DESC")
+    @Query("SELECT m FROM UserMembership m WHERE m.user = :user AND m.status = 'QUEUED' ORDER BY m.startDate ASC")
     List<UserMembership> findQueuedPlansByUser(@Param("user") User user);
 }

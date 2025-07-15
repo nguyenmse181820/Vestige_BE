@@ -39,11 +39,6 @@ public class Review {
     @Column(columnDefinition = "text")
     private String comment;
 
-    private Integer authenticityRating;
-
-    @Column(columnDefinition = "text")
-    private String authenticityComment;
-
     @CreationTimestamp
     private LocalDateTime createdAt;
 }

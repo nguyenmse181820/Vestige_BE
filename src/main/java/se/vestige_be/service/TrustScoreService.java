@@ -52,7 +52,7 @@ public class TrustScoreService {
 //        double profileScore = calculateProfileScore(user);
 
 //        double overallScore = (performanceScore * 0.60) + (reviewScore * 0.25) + (profileScore * 0.15);
-        double overallScore = (performanceScore * 0.70) + (reviewScore * 0.35);
+        double overallScore = (performanceScore * 0.70) + (reviewScore * 0.30);
         return (int) Math.round(overallScore);
     }
 

@@ -6,6 +6,7 @@ import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.UserMembershipDTO;
+import se.vestige_be.dto.response.UserSubscriptionStatusResponse;
 import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.exception.ResourceNotFoundException;
 import se.vestige_be.mapper.ModelMapper;
@@ -21,6 +22,7 @@ import java.util.List;
 import java.util.Objects;
 import java.util.Optional;
 import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 @Service
 @RequiredArgsConstructor
@@ -318,6 +320,40 @@ public class MembershipService {
             log.warn("Membership with order code {} has unexpected status: {}", orderCode, membership.getStatus());
             return;
         }
+    }
+
+    @Transactional(readOnly = true)
+    public UserSubscriptionStatusResponse getFullSubscriptionStatus(UserDetails currentUserDetails) {
+        User user = userRepository.findByUsername(currentUserDetails.getUsername())
+                .orElseThrow(() -> new ResourceNotFoundException(currentUserDetails.getUsername()));
+
+        Optional<UserMembership> activeMembershipOpt = userMembershipRepository.findByUserAndStatus(user, MembershipStatus.ACTIVE);
+        List<UserMembership> queuedMemberships = userMembershipRepository.findQueuedPlansByUser(user);
+
+        UserMembershipDTO activeDto = activeMembershipOpt.map(modelMapper::toUserMembershipDTO).orElse(null);
+        List<UserMembershipDTO> queuedDtos = queuedMemberships.stream()
+                .map(modelMapper::toUserMembershipDTO)
+                .collect(Collectors.toList());
+
+        LocalDateTime finalExpirationDate = null;
+        if (!queuedDtos.isEmpty()) {
+            finalExpirationDate = queuedDtos.get(queuedDtos.size() - 1).getEndDate();
+        } else if (activeDto != null) {
+            finalExpirationDate = activeDto.getEndDate();
+        }
+
+        int totalBoosts = Stream.concat(
+                activeMembershipOpt.stream(),
+                queuedMemberships.stream()
+        ).mapToInt(m -> m.getBoostsRemaining() != null ? m.getBoostsRemaining() : 0).sum();
+
+
+        return UserSubscriptionStatusResponse.builder()
+                .activeMembership(activeDto)
+                .queuedMemberships(queuedDtos)
+                .finalExpirationDate(finalExpirationDate)
+                .totalBoostsAvailable(totalBoosts)
+                .build();
     }
 
     /**

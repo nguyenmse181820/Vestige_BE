@@ -239,6 +239,22 @@ public class ProductService {
         Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
 
+        // Null safety checks
+        if (product.getSeller() == null) {
+            log.error("Product {} has null seller", productId);
+            throw new BusinessLogicException("Product has no seller assigned");
+        }
+        
+        if (product.getSeller().getUserId() == null) {
+            log.error("Product {} seller has null userId", productId);
+            throw new BusinessLogicException("Product seller has no userId");
+        }
+        
+        if (sellerId == null) {
+            log.error("sellerId is null for product update request");
+            throw new BusinessLogicException("User ID is null");
+        }
+        
         // Security check: Only the seller can update their own product
         if (!product.getSeller().getUserId().equals(sellerId)) {
             throw new UnauthorizedException("You are not authorized to update this product.");

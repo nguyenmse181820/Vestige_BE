@@ -109,7 +109,7 @@ public class ReviewController {
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size,
             
             @Parameter(description = "Field to sort by", example = "createdAt",
-                      schema = @Schema(allowableValues = {"createdAt", "rating", "authenticityRating"}))
+                      schema = @Schema(allowableValues = {"createdAt", "rating"}))
             @RequestParam(defaultValue = "createdAt") String sortBy,
             
             @Parameter(description = "Sort direction", example = "desc",
@@ -173,7 +173,7 @@ public class ReviewController {
             @RequestParam(defaultValue = "10") @Min(1) @Max(100) int size,
             
             @Parameter(description = "Field to sort by", example = "createdAt",
-                      schema = @Schema(allowableValues = {"createdAt", "rating", "authenticityRating"}))
+                      schema = @Schema(allowableValues = {"createdAt", "rating"}))
             @RequestParam(defaultValue = "createdAt") String sortBy,
             
             @Parameter(description = "Sort direction", example = "desc",
