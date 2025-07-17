@@ -26,6 +26,7 @@ import se.vestige_be.exception.BusinessLogicException;
 import se.vestige_be.pojo.User;
 import se.vestige_be.service.OrderService;
 import se.vestige_be.service.UserService;
+import se.vestige_be.service.PayOsPaymentService;
 import se.vestige_be.util.PaginationUtils;
 
 import java.math.BigDecimal;
@@ -45,6 +46,7 @@ public class OrderController {
 
     private final OrderService orderService;
     private final UserService userService;
+    private final PayOsPaymentService payOsPaymentService;
 
     @Operation(
             summary = "Create a new order",
@@ -80,15 +82,59 @@ public class OrderController {
             @AuthenticationPrincipal UserDetails userDetails) {
 
         User user = userService.findByUsername(userDetails.getUsername());
-        
-        // Move all logic to service layer - service handles try-catch and error messages
+
         OrderDetailResponse order = orderService.createOrder(request, user.getUserId());
         
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(ApiResponse.<OrderDetailResponse>builder()
                         .message("Order created successfully")
                         .data(order)
-                        .build());    }
+                        .build());
+    }
+
+    @Operation(
+            summary = "Create PayOS payment for order",
+            description = "Creates a new order with PayOS payment method. Returns PayOS checkout URL for payment completion."
+    )
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "201",
+                    description = "PayOS payment created successfully",
+                    content = @Content(schema = @Schema(implementation = PayOsPaymentService.PaymentResponse.class))
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid order data or business rule violation"
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "401",
+                    description = "Authentication required"
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "403",
+                    description = "Access denied - User role required"
+            )
+    })
+    @SecurityRequirement(name = "bearerAuth")
+    @PostMapping("/payos")
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<PayOsPaymentService.PaymentResponse>> createPayOsPayment(
+            @Parameter(description = "Order creation data for PayOS payment", required = true)
+            @Valid @RequestBody OrderCreateRequest request,
+            
+            @Parameter(hidden = true)
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        User user = userService.findByUsername(userDetails.getUsername());
+        
+        PayOsPaymentService.PaymentResponse paymentResponse = payOsPaymentService.createPayment(user.getUserId(), request);
+        
+        return ResponseEntity.status(HttpStatus.CREATED)
+                .body(ApiResponse.<PayOsPaymentService.PaymentResponse>builder()
+                        .message("PayOS payment created successfully")
+                        .data(paymentResponse)
+                        .build());
+    }
 
     @Operation(
             summary = "Get user's orders with filtering",
@@ -972,6 +1018,43 @@ public class OrderController {
         
         return ResponseEntity.ok(ApiResponse.<String>builder()
                 .message("Escrow released successfully by admin")
+                .build());
+    }
+
+    @Operation(
+            summary = "[ADMIN] Update escrow status",
+            description = "Manually update escrow status for a specific transaction. Supports manual handling of PayOS payments."
+    )
+    @PutMapping("/admin/transactions/{transactionId}/escrow-status")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<String>> updateEscrowStatus(
+            @Parameter(description = "Transaction ID") @PathVariable Long transactionId,
+            @Parameter(description = "New escrow status") @RequestParam String escrowStatus,
+            @Parameter(description = "Admin notes for the action") @RequestParam(required = false) String notes,
+            @AuthenticationPrincipal UserDetails userDetails
+    ) {
+        log.info("Admin updating escrow status for transaction: {} to {}", transactionId, escrowStatus);
+        
+        User admin = userService.findByUsername(userDetails.getUsername());
+        orderService.updateEscrowStatus(transactionId, escrowStatus, notes, admin.getUserId());
+        
+        return ResponseEntity.ok(ApiResponse.<String>builder()
+                .message("Escrow status updated successfully by admin")
+                .build());
+    }
+    @Operation(
+            summary = "[ADMIN] Get transactions awaiting escrow release",
+            description = "Get all transactions in AWAITING_RELEASE status that need admin attention for escrow release."
+    )
+    @GetMapping("/admin/transactions/awaiting-release")
+    @PreAuthorize("hasRole('ADMIN')")
+    public ResponseEntity<ApiResponse<List<Map<String, Object>>>> getTransactionsAwaitingRelease() {
+        
+        List<Map<String, Object>> transactions = orderService.getTransactionsAwaitingRelease();
+        
+        return ResponseEntity.ok(ApiResponse.<List<Map<String, Object>>>builder()
+                .message("Transactions awaiting escrow release retrieved successfully")
+                .data(transactions)
                 .build());
     }
 

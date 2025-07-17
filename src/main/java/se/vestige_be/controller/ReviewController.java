@@ -18,6 +18,7 @@ import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.core.userdetails.UserDetails;
 import org.springframework.web.bind.annotation.*;
 import se.vestige_be.dto.request.CreateReviewRequest;
+import se.vestige_be.dto.request.UpdateReviewRequest;
 import se.vestige_be.dto.response.ApiResponse;
 import se.vestige_be.dto.response.PagedResponse;
 import se.vestige_be.dto.response.ReviewResponse;
@@ -80,6 +81,47 @@ public class ReviewController {
         return ResponseEntity.status(201).body(ApiResponse.<ReviewResponse>builder()
                 .message("Review created successfully")
                 .data(review)
+                .build());
+    }
+
+    @Operation(
+            summary = "Update a review for a seller",
+            description = "Update a review and rating for a seller."
+    )
+    @SecurityRequirement(name = "bearerAuth")
+    @ApiResponses(value = {
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "201",
+                    description = "Review updated successfully"
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "400",
+                    description = "Invalid request"
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "403",
+                    description = "Unauthorized - not the buyer of this transaction"
+            ),
+            @io.swagger.v3.oas.annotations.responses.ApiResponse(
+                    responseCode = "404",
+                    description = "Transaction not found"
+            )
+    })
+    @PatchMapping
+    @PreAuthorize("hasRole('USER')")
+    public ResponseEntity<ApiResponse<ReviewResponse>> updateReview(
+            @Parameter(description = "Review update request", required = true)
+            @Valid @RequestBody UpdateReviewRequest request,
+
+            @Parameter(hidden = true)
+            @AuthenticationPrincipal UserDetails userDetails) {
+
+        User user = userService.findByUsername(userDetails.getUsername());
+
+        reviewService.updateReview(request, user.getUserId());
+
+        return ResponseEntity.status(201).body(ApiResponse.<ReviewResponse>builder()
+                .message("Review updated successfully")
                 .build());
     }
 

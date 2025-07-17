@@ -234,7 +234,9 @@ public class ProductService {
 
         Product savedProduct = productRepository.save(product);
         return convertToDetailResponse(savedProduct);
-    }    @Transactional
+    }
+
+    @Transactional
     public ProductDetailResponse updateProduct(Long productId, ProductUpdateRequest request, Long sellerId) {
         Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
@@ -263,21 +265,34 @@ public class ProductService {
         // Business rule: Cannot update sold products
         if (ProductStatus.SOLD.equals(product.getStatus())) {
             throw new BusinessLogicException("Cannot update a product that has been sold.");
-        }        // Enhanced business rule for DRAFT vs non-DRAFT products
+        }
+        // Enhanced business rule for DRAFT vs non-DRAFT products
         if (ProductStatus.DRAFT.equals(product.getStatus())) {
             // For DRAFT products: Users can update everything freely until admin approval
             // Only restriction: they cannot change status from DRAFT to anything else
             if (request.hasStatus() && !ProductStatus.DRAFT.equals(request.getStatus())) {
                 throw new BusinessLogicException("Cannot change status from DRAFT. Only admin can approve draft products.");
             }
-            log.debug("Updating DRAFT product {} by seller {} - full edit permissions", productId, sellerId);
+        } else if (ProductStatus.ACTIVE.equals(product.getStatus())) {
+            // For ACTIVE products: Users cannot change status, and any content update requires re-approval
+            if (request.hasStatus()) {
+                throw new BusinessLogicException("Cannot change status of ACTIVE products. Any content changes will require admin re-approval.");
+            }
         } else {
-            // For non-DRAFT products: Restricted updates as before
+            // For other non-DRAFT products (INACTIVE, etc.): Restricted updates as before
             // Users can only set ACTIVE or INACTIVE status
             if (request.hasStatus() && !request.isValidUserStatus()) {
                 throw new BusinessLogicException("Invalid status. Users can only set ACTIVE or INACTIVE status for approved products.");
             }
-            log.debug("Updating approved product {} by seller {} - restricted edit permissions", productId, sellerId);
+        }
+
+        // Check if any content fields are being updated for ACTIVE products
+        boolean hasContentChanges = false;
+        if (ProductStatus.ACTIVE.equals(product.getStatus())) {
+            hasContentChanges = request.hasCategoryId() || request.hasBrandId() || request.hasTitle() || 
+                              request.hasDescription() || request.hasCondition() || request.hasSize() || 
+                              request.hasColor() || request.hasPrice() || request.hasOriginalPrice() || 
+                              request.hasImageUrls();
         }
 
         if (request.hasCategoryId() && !product.getCategory().getCategoryId().equals(request.getCategoryId())) {
@@ -340,9 +355,17 @@ public class ProductService {
             product.getImages().addAll(newImages);
         }
 
+        // If ACTIVE product had content changes, set status to DRAFT for re-approval
+        if (hasContentChanges) {
+            product.setStatus(ProductStatus.DRAFT);
+            log.info("Product {} status changed to DRAFT due to content updates, requires admin re-approval", productId);
+        }
+
         Product savedProduct = productRepository.save(product);
         return convertToDetailResponse(savedProduct);
-    }    @Transactional
+    }
+
+    @Transactional
     public void deleteProduct(Long productId, Long sellerId) {
         Product product = productRepository.findByIdWithRelations(productId)
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found with ID: " + productId));
@@ -875,7 +898,7 @@ public class ProductService {
         }
 
         log.debug("Base slug '{}' already exists, checking for multiple sellers", baseSlug);
-        boolean hasMultipleSellers = productRepository.hasMultipleSellersForSlug(baseSlug);
+        boolean hasMultipleSellers = productRepository.existsByMultipleSellersWithSlugStartingWith(baseSlug);
         
         if (hasMultipleSellers) {
             String sellerSlug = baseSlug + "-by-" + SlugUtils.generateSlug(sellerUsername);

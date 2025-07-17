@@ -446,7 +446,8 @@ public class ProductController {
                 .status(HttpStatus.OK.toString())
                 .message("Product updated successfully")
                 .data(product)
-                .build());    }
+                .build());
+    }
 
     @Operation(
             summary = "[ADMIN] Update any product with unrestricted access",

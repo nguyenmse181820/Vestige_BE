@@ -337,7 +337,8 @@ public class MembershipService {
 
         LocalDateTime finalExpirationDate = null;
         if (!queuedDtos.isEmpty()) {
-            finalExpirationDate = queuedDtos.get(queuedDtos.size() - 1).getEndDate();
+            // Since queuedDtos are ordered by endDate DESC, the first one has the latest end date
+            finalExpirationDate = queuedDtos.get(0).getEndDate();
         } else if (activeDto != null) {
             finalExpirationDate = activeDto.getEndDate();
         }
@@ -383,6 +384,43 @@ public class MembershipService {
             }
         } else {
             log.warn("No membership found for failed payment with order code: {}", orderCode);
+        }
+    }
+
+    /**
+     * Cancel a pending subscription (used when PayOS payment is cancelled)
+     */
+    @Transactional
+    public void cancelPendingSubscription(String orderCode) {
+        log.info("Cancelling pending subscription for order code: {}", orderCode);
+        
+        Optional<UserMembership> membershipOpt = userMembershipRepository.findByPayosSubscriptionId(orderCode);
+        
+        if (membershipOpt.isEmpty()) {
+            String paddedOrderCode = String.format("%08d", Long.parseLong(orderCode));
+            membershipOpt = userMembershipRepository.findByPayosSubscriptionId(paddedOrderCode);
+        }
+        
+        if (membershipOpt.isPresent()) {
+            UserMembership membership = membershipOpt.get();
+            
+            // Only cancel if the membership is in a pending state
+            if (membership.getStatus() == MembershipStatus.PENDING || 
+                membership.getStatus() == MembershipStatus.PENDING_EXTEND) {
+                
+                membership.setStatus(MembershipStatus.CANCELLED);
+                membership.setEndDate(LocalDateTime.now());
+                userMembershipRepository.save(membership);
+                
+                log.info("Successfully cancelled pending subscription for order code: {}", orderCode);
+            } else {
+                log.warn("Subscription for order code: {} is not in pending state (status: {})", 
+                        orderCode, membership.getStatus());
+                throw new BusinessLogicException("Subscription is not in a cancellable state");
+            }
+        } else {
+            log.warn("No pending subscription found for order code: {}", orderCode);
+            throw new BusinessLogicException("Pending subscription not found for order code: " + orderCode);
         }
     }
 }

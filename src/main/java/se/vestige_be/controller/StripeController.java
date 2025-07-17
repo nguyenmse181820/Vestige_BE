@@ -32,7 +32,7 @@ public class StripeController {
     private final UserService userService;
     private final MembershipService membershipService;
 
-    @Value("${app.frontend.url:http://localhost:3000}")
+    @Value("${app.frontend.url:https://vestigehouse.vercel.app}")
     private String frontendUrl;
 
     @Value("${stripe.webhook.secret}")

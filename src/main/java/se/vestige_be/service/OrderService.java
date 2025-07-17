@@ -52,6 +52,7 @@ public class OrderService {
     private final TransactionRepository transactionRepository;
     private final FeeTierService feeTierService;
     private final StripeService stripeService;
+    private final PayOsService payOsService;
     private final OrderMapper orderMapper;
 
     @Transactional
@@ -78,31 +79,52 @@ public class OrderService {
         order = orderRepository.save(order);
         String paymentIntentId = null;
         String clientSecret = null;
+        String payosCheckoutUrl = null;
+        
         if (request.getPaymentMethod() == PaymentMethod.STRIPE_CARD) {
             try {
                 PaymentIntent paymentIntent = stripeService.createPlatformCharge(order.getTotalAmount(), order.getOrderId());
                 paymentIntentId = paymentIntent.getId();
                 clientSecret = paymentIntent.getClientSecret();
 
-                // Store the PaymentIntent ID on the order
-                order.setStripePaymentIntentId(paymentIntentId);
+//                order.setStripePaymentIntentId(paymentIntentId);
                 order = orderRepository.save(order);
-
-                log.info("Created Stripe PaymentIntent {} for order {}", paymentIntentId, order.getOrderId());
             } catch (Exception e) {
-                log.error("Failed to create Stripe payment for order {}: {}", order.getOrderId(), e.getMessage());
                 throw new BusinessLogicException("Could not initialize payment. Please try again later.");
+            }
+        } else if (request.getPaymentMethod() == PaymentMethod.PAYOS) {
+            try {
+                // For PayOS, we need to create the payment link after order items are created
+                // This will be handled after order items creation
+                log.info("PayOS payment will be created for order {}", order.getOrderId());
+            } catch (Exception e) {
+                log.error("Failed to prepare PayOS payment for order {}: {}", order.getOrderId(), e.getMessage());
+                throw new BusinessLogicException("Could not initialize PayOS payment. Please try again later.");
             }
         }
 
         List<OrderItem> orderItems = createOrderItems(itemDataList, order);
         order.setOrderItems(orderItems);
 
-        // Save the order with its items to get proper IDs
         order = orderRepository.save(order);
 
         // Create transactions after order items have been saved and have IDs
         createTransactions(order.getOrderItems(), buyer, shippingAddress, paymentIntentId);
+        
+        // Handle PayOS payment link creation after order items are created
+        /*
+        if (request.getPaymentMethod() == PaymentMethod.PAYOS) {
+            try {
+                PayOsPaymentService.PaymentResponse paymentResponse = payOsPaymentService.createPayment(buyerId, request);
+                payosCheckoutUrl = paymentResponse.getCheckoutUrl();
+                log.info("Created PayOS payment link for order {}: {}", order.getOrderId(), payosCheckoutUrl);
+            } catch (Exception e) {
+                log.error("Failed to create PayOS payment for order {}: {}", order.getOrderId(), e.getMessage());
+                throw new BusinessLogicException("Could not create PayOS payment. Please try again later.");
+            }
+        }
+        */
+        
         markProductsAsPendingPayment(itemDataList);
 
         // Refresh the order from database to ensure all relationships are loaded
@@ -111,11 +133,53 @@ public class OrderService {
 
         // Convert to response after everything is properly saved
         OrderDetailResponse response = convertToDetailResponse(order);
-        if (clientSecret != null) {
-            response.setMetadata(Map.of("clientSecret", clientSecret));
+//        if (clientSecret != null) {
+//            response.setMetadata(Map.of("clientSecret", clientSecret));
+//        }
+        if (payosCheckoutUrl != null) {
+            response.setMetadata(Map.of("payosCheckoutUrl", payosCheckoutUrl));
         }
 
         return response;
+    }
+
+    /**
+     * Overloaded method for PayOS payment service
+     */
+    @Transactional
+    public Order createOrder(User buyer, UserAddress shippingAddress, List<OrderItem> orderItems, 
+                            PaymentMethod paymentMethod, String stripePaymentIntentId, String payosOrderCode) {
+        
+        BigDecimal totalAmount = orderItems.stream()
+                .map(OrderItem::getPrice)
+                .reduce(BigDecimal.ZERO, BigDecimal::add);
+
+        Order order = Order.builder()
+                .buyer(buyer)
+                .totalAmount(totalAmount)
+                .shippingAddress(shippingAddress)
+                .paymentMethod(paymentMethod)
+                .status(OrderStatus.PENDING)
+                .build();
+        order = orderRepository.save(order);
+
+        // Set order reference for each order item
+        for (OrderItem orderItem : orderItems) {
+            orderItem.setOrder(order);
+        }
+        List<OrderItem> savedOrderItems = orderItemRepository.saveAll(orderItems);
+        
+        // Update the order with the saved order items
+        order.setOrderItems(savedOrderItems);
+
+        // Create transactions based on payment method
+        if (paymentMethod == PaymentMethod.PAYOS) {
+            createTransactionsWithPayOS(savedOrderItems, buyer, shippingAddress, payosOrderCode);
+        } else {
+            createTransactions(savedOrderItems, buyer, shippingAddress, stripePaymentIntentId);
+        }
+
+        return order;
     }
 
     @Transactional
@@ -156,7 +220,60 @@ public class OrderService {
             throw new BusinessLogicException("Payment verification failed: " + e.getMessage());
         }
 
-        order.setStripePaymentIntentId(stripePaymentIntentId);
+//        order.setStripePaymentIntentId(stripePaymentIntentId);
+        order.setStatus(OrderStatus.PROCESSING);
+        order.setPaidAt(LocalDateTime.now());        
+        order.getOrderItems().forEach(item -> {
+            if (item.getStatus() == OrderItemStatus.PENDING) {
+                item.setStatus(OrderItemStatus.PROCESSING);
+                item.setEscrowStatus(EscrowStatus.HOLDING);
+
+                Product product = item.getProduct();
+                product.setStatus(ProductStatus.SOLD);
+                product.setSoldAt(LocalDateTime.now());
+                productRepository.save(product);
+            }
+        });
+
+        // Update transaction escrow status when payment is confirmed
+        for (OrderItem item : order.getOrderItems()) {
+            Transaction transaction = getTransactionForOrderItem(item.getOrderItemId());
+            if (transaction != null && transaction.getEscrowStatus() == EscrowStatus.CANCELLED) {
+                transaction.setEscrowStatus(EscrowStatus.HOLDING);
+                transactionRepository.save(transaction);
+            }
+        }
+
+        order = orderRepository.save(order);
+        return convertToDetailResponse(order);
+    }
+
+    @Transactional
+    public OrderDetailResponse confirmPayOsPayment(Long orderId, Long buyerId, String payosOrderCode) {
+        Order order = getOrderWithValidation(orderId, buyerId, true);
+
+        if (!OrderStatus.PENDING.equals(order.getStatus())) {
+            throw new BusinessLogicException("Order is not in pending status");
+        }
+
+        try {
+            // Verify payment with PayOS
+            long orderCode = Long.parseLong(payosOrderCode);
+            boolean paymentSuccessful = payOsService.verifyPaymentStatus(orderCode);
+            
+            if (!paymentSuccessful) {
+                throw new BusinessLogicException("PayOS payment verification failed for order code: " + payosOrderCode);
+            }
+
+            log.info("PayOS payment verified successfully for order {}, order code: {}", orderId, payosOrderCode);
+
+        } catch (BusinessLogicException e) {
+            throw e;
+        } catch (Exception e) {
+            log.error("PayOS payment verification failed for order {}: {}", orderId, e.getMessage());
+            throw new BusinessLogicException("Payment verification failed: " + e.getMessage());
+        }
+
         order.setStatus(OrderStatus.PROCESSING);
         order.setPaidAt(LocalDateTime.now());        
         order.getOrderItems().forEach(item -> {
@@ -401,16 +518,20 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
                     .orElse(null);
         }
 
-        // Process Stripe refund if payment intent exists
-        if (paymentIntentId != null) {
+        // Process Stripe refund only if payment method is STRIPE and payment intent exists
+        if (paymentIntentId != null && order.getPaymentMethod() == PaymentMethod.STRIPE_CARD) {
             try {
-                log.info("Admin {} processing refund for order {} amount {} reason: {}",
+                log.info("Admin {} processing Stripe refund for order {} amount {} reason: {}",
                         adminId, orderId, refundAmount, reason);
                 stripeService.refundPayment(paymentIntentId, refundAmount);
             } catch (Exception e) {
-                log.error("Admin refund failed for order {}: {}", orderId, e.getMessage());
+                log.error("Admin Stripe refund failed for order {}: {}", orderId, e.getMessage());
                 throw new BusinessLogicException("Stripe refund failed: " + e.getMessage());
             }
+        } else if (order.getPaymentMethod() == PaymentMethod.PAYOS) {
+            // For PayOs payments, we just update the status - actual refund handled by PayOs
+            log.info("Admin {} marking refund for PayOs order {} amount {} reason: {} (PayOs handled)",
+                    adminId, orderId, refundAmount, reason);
         }
 
         // Update order status only if full refund
@@ -543,10 +664,13 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
         List<Map<String, Object>> trends = generateTrendData(period, periods, start, end);
 
         // 6. Performance metrics
-        double completionRate = totalOrders > 0 ?
-                (double)totalCompletedOrders / totalOrders * 100 : 0;
-        double cancellationRate = totalOrders > 0 ?
-                (double)totalCancelledOrders / totalOrders * 100 : 0;
+        // Fix: Success rate should be calculated based on completed transactions only
+        // Don't include pending orders in the denominator
+        long completedTransactions = totalCompletedOrders + totalCancelledOrders;
+        double completionRate = completedTransactions > 0 ?
+                (double)totalCompletedOrders / completedTransactions * 100 : 0;
+        double cancellationRate = completedTransactions > 0 ?
+                (double)totalCancelledOrders / completedTransactions * 100 : 0;
 
         // 7. Category analysis - top selling categories
         List<Map<String, Object>> topCategories = getTopSellingCategories(5, start, end);
@@ -1083,7 +1207,7 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
 
     private void createTransactions(List<OrderItem> orderItems, User buyer, UserAddress shippingAddress, String paymentIntentId) {
         for (OrderItem orderItem : orderItems) {
-            Transaction transaction = Transaction.builder()
+            Transaction.TransactionBuilder transactionBuilder = Transaction.builder()
                     .orderItem(orderItem)
                     .seller(orderItem.getSeller())
                     .buyer(buyer)
@@ -1092,9 +1216,38 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
                     .feePercentage(orderItem.getFeePercentage())
                     .shippingAddress(shippingAddress)
                     .status(TransactionStatus.PENDING)
-                    .escrowStatus(EscrowStatus.CANCELLED) // No money yet, will change to HOLDING after payment
-                    .stripePaymentIntentId(paymentIntentId)
-                    .build();
+                    .escrowStatus(EscrowStatus.CANCELLED); // No money yet, will change to HOLDING after payment
+                    
+            // Add payment method specific fields
+            if (paymentIntentId != null) {
+                transactionBuilder.stripePaymentIntentId(paymentIntentId);
+            }
+            
+            Transaction transaction = transactionBuilder.build();
+            transactionRepository.save(transaction);
+        }
+    }
+    
+    // Overloaded method for PayOS payments
+    private void createTransactionsWithPayOS(List<OrderItem> orderItems, User buyer, UserAddress shippingAddress, String payosOrderCode) {
+        for (OrderItem orderItem : orderItems) {
+            Transaction.TransactionBuilder transactionBuilder = Transaction.builder()
+                    .orderItem(orderItem)
+                    .seller(orderItem.getSeller())
+                    .buyer(buyer)
+                    .amount(orderItem.getPrice())
+                    .platformFee(orderItem.getPlatformFee())
+                    .feePercentage(orderItem.getFeePercentage())
+                    .shippingAddress(shippingAddress)
+                    .status(TransactionStatus.PENDING)
+                    .escrowStatus(EscrowStatus.CANCELLED); // No money yet, will change to HOLDING after payment
+                    
+            // Add PayOS order code
+            if (payosOrderCode != null) {
+                transactionBuilder.payosOrderCode(payosOrderCode);
+            }
+            
+            Transaction transaction = transactionBuilder.build();
             transactionRepository.save(transaction);
         }
     }
@@ -1113,7 +1266,8 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
         Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
         transaction.setDeliveredAt(LocalDateTime.now());
         transaction.setStatus(TransactionStatus.DELIVERED);
-        orderItem.setEscrowStatus(EscrowStatus.RELEASED);
+        transaction.setEscrowStatus(EscrowStatus.AWAITING_RELEASE);
+        orderItem.setEscrowStatus(EscrowStatus.AWAITING_RELEASE);
 
         transactionRepository.save(transaction);
     }
@@ -1138,7 +1292,10 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
             try {
                 OrderItem orderItem = transaction.getOrderItem();
                 log.info("Attempting to release payment for transaction {}.", transaction.getTransactionId());
-                stripeService.releasePaymentToSeller(orderItem, transaction);
+                
+                // Since we're using PayOs, we don't need to call external payment service
+                // The actual fund transfer will be handled by PayOs system separately
+                log.info("Payment release for transaction {} - handled by PayOs system", transaction.getTransactionId());
 
                 transaction.setEscrowStatus(EscrowStatus.TRANSFERRED);
                 transactionRepository.save(transaction);
@@ -1152,6 +1309,56 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
                 transactionRepository.save(transaction);
             }
         }
+    }
+
+    /**
+     * Admin manually releases escrow for a transaction
+     */
+    @Transactional
+    public void adminReleaseEscrow(Long transactionId, Long adminId) {
+        Transaction transaction = transactionRepository.findById(transactionId)
+                .orElseThrow(() -> new BusinessLogicException("Transaction not found"));
+
+        if (transaction.getEscrowStatus() != EscrowStatus.AWAITING_RELEASE) {
+            throw new BusinessLogicException("Transaction is not in AWAITING_RELEASE status");
+        }
+
+        OrderItem orderItem = transaction.getOrderItem();
+        if (orderItem.getStatus() != OrderItemStatus.DELIVERED) {
+            throw new BusinessLogicException("Order item must be delivered before releasing escrow");
+        }
+
+        // Use the existing forceReleaseEscrow method
+        forceReleaseEscrow(transactionId, "Admin manually released escrow after delivery confirmation", adminId);
+        
+        // Update orderItem escrow status
+        orderItem.setEscrowStatus(EscrowStatus.RELEASED);
+        
+        log.info("Admin {} manually released escrow for transaction {}", adminId, transactionId);
+    }
+
+    /**
+     * Get transactions awaiting escrow release
+     */
+    public List<Map<String, Object>> getTransactionsAwaitingRelease() {
+        List<Transaction> transactions = transactionRepository.findByEscrowStatus(EscrowStatus.AWAITING_RELEASE);
+        
+        return transactions.stream().map(transaction -> {
+            Map<String, Object> data = new HashMap<>();
+            data.put("transactionId", transaction.getTransactionId());
+            data.put("orderId", transaction.getOrderItem().getOrder().getOrderId());
+            data.put("amount", transaction.getAmount());
+            data.put("platformFee", transaction.getPlatformFee());
+            data.put("sellerAmount", transaction.getAmount().subtract(transaction.getPlatformFee()));
+            data.put("buyerUsername", transaction.getBuyer().getUsername());
+            data.put("sellerUsername", transaction.getSeller().getUsername());
+            data.put("productTitle", transaction.getOrderItem().getProduct().getTitle());
+            data.put("deliveredAt", transaction.getDeliveredAt());
+            data.put("paymentMethod", transaction.getOrderItem().getOrder().getPaymentMethod());
+            data.put("status", transaction.getStatus());
+            data.put("escrowStatus", transaction.getEscrowStatus());
+            return data;
+        }).collect(Collectors.toList());
     }
 
     private void handleItemCancelled(OrderItem orderItem) {
@@ -1616,31 +1823,21 @@ public void forceReleaseEscrow(Long transactionId, String notes, Long adminId) {
     Transaction transaction = transactionRepository.findById(transactionId)
             .orElseThrow(() -> new ResourceNotFoundException("Transaction not found with ID: " + transactionId));
 
-    if (transaction.getEscrowStatus() != EscrowStatus.HOLDING) {
+    if (transaction.getEscrowStatus() != EscrowStatus.HOLDING && 
+        transaction.getEscrowStatus() != EscrowStatus.AWAITING_RELEASE) {
         throw new BusinessLogicException("Cannot release escrow: current status is " + transaction.getEscrowStatus());
     }
 
     try {
-        // Attempt transfer to seller
+        // Since we're using PayOs, we just update the escrow status without external transfers
+        // The actual fund transfer will be handled by PayOs system separately
         BigDecimal sellerAmount = transaction.getAmount().subtract(transaction.getPlatformFee());
         User seller = transaction.getSeller();
 
-        // If seller has Stripe account, initiate transfer
-        if (seller.getStripeAccountId() != null) {
-            String transferId = stripeService.transferToSeller(
-                    sellerAmount,
-                    seller.getStripeAccountId(),
-                    transaction.getTransactionId()
-            );
-            transaction.setStripeTransferId(transferId);
-            log.info("Admin {} force released escrow for transaction {}. Transfer ID: {}",
-                    adminId, transactionId, transferId);
-        } else {
-            log.warn("Admin {} force released escrow for transaction {} but seller has no Stripe account",
-                    adminId, transactionId);
-        }
+        log.info("Admin {} force released escrow for transaction {}. Seller amount: {} (PayOs handled)",
+                adminId, transactionId, sellerAmount);
 
-        // Update escrow status regardless of transfer outcome
+        // Update escrow status - no external payment system calls needed
         transaction.setEscrowStatus(EscrowStatus.RELEASED);
         transaction = transactionRepository.save(transaction);
 
@@ -1649,6 +1846,51 @@ public void forceReleaseEscrow(Long transactionId, String notes, Long adminId) {
         log.error("Admin escrow release failed for transaction {}: {}", transactionId, e.getMessage());
         throw new BusinessLogicException("Escrow release failed: " + e.getMessage());
     }
+}
+
+/**
+ * Admin method to manually update escrow status for a specific transaction
+ */
+@Transactional
+public void updateEscrowStatus(Long transactionId, String escrowStatusStr, String notes, Long adminId) {
+    Transaction transaction = transactionRepository.findById(transactionId)
+            .orElseThrow(() -> new ResourceNotFoundException("Transaction not found with ID: " + transactionId));
+
+    EscrowStatus newEscrowStatus;
+    try {
+        newEscrowStatus = EscrowStatus.valueOf(escrowStatusStr.toUpperCase());
+    } catch (IllegalArgumentException e) {
+        throw new BusinessLogicException("Invalid escrow status: " + escrowStatusStr);
+    }
+
+    EscrowStatus currentStatus = transaction.getEscrowStatus();
+    
+    // Log the change
+    log.info("Admin {} updating escrow status for transaction {} from {} to {}. Notes: {}", 
+             adminId, transactionId, currentStatus, newEscrowStatus, notes);
+
+    // Update escrow status
+    transaction.setEscrowStatus(newEscrowStatus);
+    
+    // Update transaction status based on escrow status
+    if (newEscrowStatus == EscrowStatus.RELEASED) {
+        // Since we're using PayOs, we just update the status without external transfers
+        // The actual fund transfer will be handled by PayOs system separately
+        BigDecimal sellerAmount = transaction.getAmount().subtract(transaction.getPlatformFee());
+        User seller = transaction.getSeller();
+        
+        log.info("Admin {} updated escrow to RELEASED for transaction {}. Seller amount: {} (PayOs handled)",
+                adminId, transactionId, sellerAmount);
+                
+    } else if (newEscrowStatus == EscrowStatus.REFUNDED) {
+        // Since we're using PayOs, we just update the status without external refunds
+        // The actual refund will be handled by PayOs system separately
+        log.info("Admin {} updated escrow to REFUNDED for transaction {} (PayOs handled)", adminId, transactionId);
+    }
+
+    transaction = transactionRepository.save(transaction);
+    log.info("Admin {} successfully updated escrow status for transaction {} to {}", 
+             adminId, transactionId, newEscrowStatus);
 }
 
     private boolean hasReview(Transaction transaction) {
@@ -1793,21 +2035,24 @@ public OrderDetailResponse adminUpdateUserOrder(Long userId, Long orderId, Strin
             // Handle cancellation if it was previously paid and processed
             if (currentStatus == OrderStatus.PROCESSING ||
                     currentStatus == OrderStatus.OUT_FOR_DELIVERY) {
-                // Initiate refund process if order was paid
-                if (order.getStripePaymentIntentId() != null) {
+                // Initiate refund process if order was paid via Stripe
+                if (order.getStripePaymentIntentId() != null && order.getPaymentMethod() == PaymentMethod.STRIPE_CARD) {
                     try {
                         // Create refund amount for full order total
                         BigDecimal refundAmount = order.getTotalAmount();
                         stripeService.refundPayment(order.getStripePaymentIntentId(), refundAmount);
                     } catch (Exception e) {
                         if (!forceUpdate) {
-                            throw new BusinessLogicException("Failed to process refund: " + e.getMessage() +
+                            throw new BusinessLogicException("Failed to process Stripe refund: " + e.getMessage() +
                                     ". Use forceUpdate=true to bypass refund check.");
                         }
                         // Log the error but proceed if forceUpdate is true
-                        log.error("Failed to process refund for forced order cancellation. Order ID: {}, Error: {}",
+                        log.error("Failed to process Stripe refund for forced order cancellation. Order ID: {}, Error: {}",
                                 orderId, e.getMessage());
                     }
+                } else if (order.getPaymentMethod() == PaymentMethod.PAYOS) {
+                    // For PayOs payments, we just update the status - actual refund handled by PayOs
+                    log.info("Order {} cancelled - PayOs refund will be handled separately", orderId);
                 }
             }
             break;

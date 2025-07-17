@@ -48,8 +48,11 @@ public interface ProductRepository extends JpaRepository<Product,Long>, JpaSpeci
     @Query("SELECT p FROM Product p LEFT JOIN FETCH p.category LEFT JOIN FETCH p.brand LEFT JOIN FETCH p.seller WHERE p.slug = :slug")
     Optional<Product> findBySlugWithRelations(@Param("slug") String slug);    // Check if multiple sellers have products with slugs starting with the base slug
     @Query("SELECT CASE WHEN COUNT(DISTINCT p.seller.userId) > 1 THEN true ELSE false END " +
-           "FROM Product p WHERE p.slug LIKE CONCAT(:baseSlug, '%')")
-    boolean hasMultipleSellersForSlug(@Param("baseSlug") String baseSlug);
+           "FROM Product p WHERE p.slug LIKE :baseSlug%")
+    boolean existsByMultipleSellersWithSlugStartingWith(@Param("baseSlug") String baseSlug);
+    
+    // Find products by status and last updated before a certain time (for cleanup tasks)
+    List<Product> findByStatusAndUpdatedAtBefore(ProductStatus status, LocalDateTime cutoffTime);
     
     // Add method for finding last product listing date for a user
     @Query("SELECT MAX(p.createdAt) FROM Product p WHERE p.seller.userId = :sellerId")

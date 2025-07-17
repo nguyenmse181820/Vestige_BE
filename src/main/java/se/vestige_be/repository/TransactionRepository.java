@@ -15,6 +15,7 @@ import java.util.Optional;
 public interface TransactionRepository extends JpaRepository<Transaction, Long>, JpaSpecificationExecutor<Transaction> {
     Optional<Transaction> findByOrderItemOrderItemId(Long orderItemId);
     Optional<Transaction> findFirstByStripePaymentIntentId(String paymentIntentId);
+    Optional<Transaction> findByPayosOrderCode(String payosOrderCode);
     List<Transaction> findByStatusAndDeliveredAtBeforeAndEscrowStatus(
             TransactionStatus status,
             LocalDateTime deliveredBefore,
@@ -42,4 +43,20 @@ public interface TransactionRepository extends JpaRepository<Transaction, Long>,
            "LEFT JOIN FETCH t.reviews r " +
            "WHERE oi.orderItemId = :orderItemId")
     Optional<Transaction> findByOrderItemOrderItemIdWithAllRelationships(@Param("orderItemId") Long orderItemId);
+
+    @Query("SELECT DISTINCT t FROM Transaction t " +
+           "LEFT JOIN FETCH t.buyer " +
+           "LEFT JOIN FETCH t.seller " +
+           "LEFT JOIN FETCH t.orderItem oi " +
+           "LEFT JOIN FETCH oi.order " +
+           "LEFT JOIN FETCH oi.product p " +
+           "LEFT JOIN FETCH p.category " +
+           "LEFT JOIN FETCH p.brand " +
+           "WHERE t.payosOrderCode = :payosOrderCode")
+    Optional<Transaction> findByPayosOrderCodeWithAllRelationships(@Param("payosOrderCode") String payosOrderCode);
+    
+    // Find transactions by product ID and status (for cleanup tasks)
+    @Query("SELECT t FROM Transaction t WHERE t.orderItem.product.productId = :productId AND t.status = :status")
+    List<Transaction> findByOrderItemProductProductIdAndStatus(@Param("productId") Long productId, 
+                                                               @Param("status") TransactionStatus status);
 }

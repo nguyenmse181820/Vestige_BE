@@ -45,7 +45,7 @@ public class FeeTierService {
                     .stream()
                     .filter(plan -> "Basic".equals(plan.getName()))
                     .findFirst()
-                    .orElseThrow(() -> new BusinessLogicException("System configuration error: Default membership plan is missing."));
+                    .orElseThrow(() -> new BusinessLogicException("Default membership plan is missing."));
             return basicPlan.getFeeTier();
         }
     }

@@ -35,7 +35,7 @@ public class StripePaymentService {
     @Value("${stripe.webhook.secret}")
     private String webhookSecret;
 
-    @Value("${app.frontend.url}")
+    @Value("${app.frontend.url:https://vestigehouse.vercel.app}")
     private String frontendUrl;
 
     private final OrderRepository orderRepository;

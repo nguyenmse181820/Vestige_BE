@@ -8,6 +8,7 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import se.vestige_be.dto.request.CreateReviewRequest;
+import se.vestige_be.dto.request.UpdateReviewRequest;
 import se.vestige_be.dto.response.PagedResponse;
 import se.vestige_be.dto.response.ReviewResponse;
 import se.vestige_be.dto.response.SellerRatingResponse;
@@ -24,10 +25,7 @@ import se.vestige_be.repository.UserRepository;
 import java.math.BigDecimal;
 import java.math.RoundingMode;
 import java.time.LocalDateTime;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
-import java.util.Optional;
+import java.util.*;
 import java.util.stream.Collectors;
 
 @Service
@@ -94,6 +92,32 @@ public class ReviewService {
                 reviewer.getUsername(), transaction.getTransactionId());
 
         return convertToReviewResponse(review);
+    }
+
+    @Transactional
+    public void updateReview(UpdateReviewRequest  request, Long reviewerId) {
+        User reviewer = userRepository.findById(reviewerId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found: " + reviewerId));
+
+        Transaction transaction = transactionRepository.findById(request.getTransactionId())
+                .orElseThrow(() -> new ResourceNotFoundException("Transaction not found: " + request.getTransactionId()));
+
+        if (!transaction.getBuyer().getUserId().equals(reviewerId)) {
+            throw new UnauthorizedException("You can only review transactions where you are the buyer");
+        }
+
+        if (reviewRepository.existsByTransactionAndReviewer(transaction, reviewer)) {
+            Review review = reviewRepository.findByTransaction(transaction)
+                    .orElseThrow(() -> new ResourceNotFoundException("Review not found: " + transaction.getTransactionId()));
+            if(!Objects.equals(review.getRating(), request.getRating())) {
+                review.setRating(request.getRating());
+            }
+            if(!Objects.equals(review.getComment(), request.getComment())) {
+                review.setComment(request.getComment());
+            }
+
+            reviewRepository.save(review);
+        }
     }
 
     /**

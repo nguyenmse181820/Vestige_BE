@@ -2,7 +2,7 @@ package se.vestige_be.service;
 
 import com.google.gson.Gson;
 import com.google.gson.JsonObject;
-import lombok.RequiredArgsConstructor;
+import lombok.*;
 import lombok.extern.slf4j.Slf4j;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
@@ -23,6 +23,7 @@ import java.security.NoSuchAlgorithmException;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.Arrays;
+import java.util.Collections;
 import java.util.UUID;
 
 @Service
@@ -39,13 +40,21 @@ public class PayOsService {
     @Value("${payos.checksum-key}")
     private String checksumKey;
 
-    @Value("${app.frontend.url:http://localhost:3000}")
+    @Getter
+    @Value("${app.frontend.url:https://vestigehouse.vercel.app}")
     private String frontendUrl;
 
     @Value("${app.base.url:http://localhost:8080}")
     private String baseUrl;
 
     private final Gson gson = new Gson();
+
+    /**
+     * Create PayOS instance
+     */
+    public PayOS createPayOSInstance() {
+        return new PayOS(clientId, apiKey, checksumKey);
+    }
 
     /**
      * Creates a payment link for subscription using PayOS
@@ -65,24 +74,20 @@ public class PayOsService {
             // Create payment data with truncated description (PayOS limit: 25 characters)
             String description = createPaymentDescription(plan.getName(), user.getUsername());
             // Use frontend URLs for user redirection after payment
-            String returnUrl = baseUrl.replace(":8080", ":3000") + "/payment-success"; // Frontend success page
-            String cancelUrl = baseUrl.replace(":8080", ":3000") + "/payment-cancel"; // Frontend cancel page
+            String returnUrl = frontendUrl + "/payment-success"; // Frontend success page
+            String cancelUrl = frontendUrl + "/payment-cancel?orderCode=" + orderCode; // Frontend cancel page with orderCode
                       
             PaymentData paymentData = PaymentData.builder()
                     .orderCode(Long.parseLong(orderCode))
                     .amount(plan.getPrice().intValue())
                     .description(description)
-                    .items(Arrays.asList(item))
+                    .items(Collections.singletonList(item))
                     .cancelUrl(cancelUrl)
                     .returnUrl(returnUrl)
                     .build();
 
             // Create payment link
             CheckoutResponseData result = payOS.createPaymentLink(paymentData);
-            
-            log.info("Created PayOS payment link for user {} and plan {}: orderCode={}, checkoutUrl={}, returnUrl={}, cancelUrl={}", 
-                    user.getUsername(), plan.getName(), orderCode, result.getCheckoutUrl(), returnUrl, cancelUrl);
-            
             return CreatePaymentLinkResult.builder()
                     .checkoutUrl(result.getCheckoutUrl())
                     .orderCode(orderCode)
@@ -95,66 +100,6 @@ public class PayOsService {
             throw new BusinessLogicException("Failed to create payment link: " + e.getMessage());
         }
     }
-
-    /**
-     * Verifies webhook signature from PayOS
-     */
-    public boolean verifyWebhookSignature(String signature, String webhookBody) {
-        try {
-            if (signature == null || webhookBody == null) {
-                log.warn("Missing signature or webhook body for PayOS webhook verification");
-                return false;
-            }
-            
-            // Generate expected signature using HMAC-SHA256
-            String expectedSignature = generateHmacSignature(webhookBody, checksumKey);
-            
-            boolean isValid = signature.equals(expectedSignature);
-            log.debug("PayOS webhook signature verification: {} (expected: {}, received: {})", 
-                    isValid ? "VALID" : "INVALID", expectedSignature, signature);
-            
-            return isValid;
-            
-        } catch (Exception e) {
-            log.error("Error verifying PayOS webhook signature: {}", e.getMessage());
-            return false;
-        }
-    }
-
-    /**
-     * Parses PayOS webhook data to extract payment information
-     */
-    public PayOsWebhookData parseWebhookData(String webhookBody) {
-        try {
-            JsonObject jsonObject = gson.fromJson(webhookBody, JsonObject.class);
-            
-            // Extract data from PayOS webhook structure
-            JsonObject data = jsonObject.getAsJsonObject("data");
-            if (data == null) {
-                throw new BusinessLogicException("Invalid webhook data structure");
-            }
-            
-            String orderCode = data.get("orderCode").getAsString();
-            String status = data.get("status").getAsString();
-            String transactionId = data.has("transactionId") ? data.get("transactionId").getAsString() : null;
-            Integer amount = data.has("amount") ? data.get("amount").getAsInt() : null;
-            
-            log.debug("Parsed PayOS webhook data: orderCode={}, status={}, transactionId={}, amount={}", 
-                    orderCode, status, transactionId, amount);
-            
-            return PayOsWebhookData.builder()
-                    .orderCode(orderCode)
-                    .status(status)
-                    .transactionId(transactionId)
-                    .amount(amount)
-                    .build();
-            
-        } catch (Exception e) {
-            log.error("Failed to parse PayOS webhook data: {}", e.getMessage());
-            throw new BusinessLogicException("Failed to parse webhook data: " + e.getMessage());
-        }
-    }
-
     /**
      * Verifies the actual status of a payment link with PayOS server.
      * This is crucial for security - we cannot trust the status from URL parameters alone.
@@ -186,8 +131,6 @@ public class PayOsService {
      * Generates a unique order code using timestamp and user ID
      */
     private String generateOrderCode(Long userId) {
-        // Use current timestamp in seconds + user ID to ensure uniqueness
-        // PayOS requires order code to be a number, so we'll use timestamp + user ID
         long timestamp = LocalDateTime.now().toEpochSecond(ZoneOffset.UTC);
         String orderCode = String.valueOf(timestamp).substring(5) + String.format("%03d", userId % 1000);
         log.debug("Generated order code: {} for user ID: {}", orderCode, userId);
@@ -230,8 +173,7 @@ public class PayOsService {
         if (planName.length() <= MAX_LENGTH) {
             return planName;
         }
-        
-        // If plan name is still too long, truncate it
+
         return planName.substring(0, MAX_LENGTH - 3) + "...";
     }
 
@@ -258,10 +200,10 @@ public class PayOsService {
     /**
      * Result class for payment link creation
      */
-    @lombok.Data
-    @lombok.Builder
-    @lombok.NoArgsConstructor
-    @lombok.AllArgsConstructor
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class CreatePaymentLinkResult {
         private String checkoutUrl;
         private String orderCode;
@@ -271,10 +213,10 @@ public class PayOsService {
     /**
      * Data class for PayOS webhook information
      */
-    @lombok.Data
-    @lombok.Builder
-    @lombok.NoArgsConstructor
-    @lombok.AllArgsConstructor
+    @Data
+    @Builder
+    @NoArgsConstructor
+    @AllArgsConstructor
     public static class PayOsWebhookData {
         private String orderCode;
         private String status;

@@ -12,7 +12,7 @@ import java.util.List;
 
 @Configuration
 public class CorsConfig {
-    @Value("${cors.allowed-origins:http://localhost:3000,http://localhost:5173,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:5173}")
+    @Value("${cors.allowed-origins:https://vestigehouse.vercel.app,http://localhost:3000,http://localhost:5173,http://localhost:4000,http://127.0.0.1:3000,http://127.0.0.1:5173}")
     private String allowedOrigins;
 
     @Value("${cors.allowed-methods:GET,POST,PUT,PATCH,DELETE,OPTIONS}")
