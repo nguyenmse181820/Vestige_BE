@@ -76,7 +76,7 @@ public class ProductController {
             @RequestParam(defaultValue = "12") int size,
             
             @Parameter(description = "Field to sort by", example = "createdAt", 
-                      schema = @Schema(allowableValues = {"createdAt", "title", "price", "viewCount"}))
+                      schema = @Schema(allowableValues = {"createdAt", "title", "price", "viewCount", "likesCount"}))
             @RequestParam(defaultValue = "createdAt") String sortBy,
             
             @Parameter(description = "Sort direction", example = "desc",
@@ -288,7 +288,7 @@ public class ProductController {
             @RequestParam(required = false) String condition,
             
             @Parameter(description = "Filter by product status (ALL statuses allowed for admin)", 
-                      schema = @Schema(allowableValues = {"ACTIVE", "INACTIVE", "SOLD", "DELETED", "REPORTED", "BANNED"}))
+                      schema = @Schema(allowableValues = {"ACTIVE", "INACTIVE", "DRAFT", "SOLD", "REPORTED", "BANNED"}))
             @RequestParam(required = false) String status,
             
             @Parameter(description = "Filter by seller ID")
@@ -303,7 +303,8 @@ public class ProductController {
         return ResponseEntity.ok(ApiResponse.<PagedResponse<ProductListResponse>>builder()
                 .status(HttpStatus.OK.toString())
                 .message("All products with any status retrieved successfully for admin.")
-                .data(pagedResponse)                .build());
+                .data(pagedResponse)
+                .build());
     }
 
     @Operation(
@@ -342,7 +343,7 @@ public class ProductController {
             @RequestParam(defaultValue = "desc") String sortDir,
             
             @Parameter(description = "Filter by product status (all statuses allowed for own products)",
-                      schema = @Schema(allowableValues = {"ACTIVE", "INACTIVE", "SOLD", "DELETED"}))
+                      schema = @Schema(allowableValues = {"ACTIVE", "INACTIVE", "SOLD"}))
             @RequestParam(required = false) String status,
             
             @Parameter(hidden = true)

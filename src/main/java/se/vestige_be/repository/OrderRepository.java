@@ -16,20 +16,24 @@ import java.util.List;
 import java.util.Optional;
 
 public interface OrderRepository extends JpaRepository<Order, Long>, JpaSpecificationExecutor<Order> {
-    @Query("SELECT DISTINCT o FROM Order o " +
+    @Query(value = "SELECT DISTINCT o FROM Order o " +
            "LEFT JOIN FETCH o.orderItems oi " +
            "LEFT JOIN FETCH oi.product p " +
            "LEFT JOIN FETCH oi.seller " +
            "WHERE o.buyer.userId = :buyerId " +
-           "ORDER BY o.createdAt DESC")
+           "ORDER BY o.createdAt DESC",
+           countQuery = "SELECT COUNT(DISTINCT o) FROM Order o " +
+           "WHERE o.buyer.userId = :buyerId")
     Page<Order> findByBuyerUserIdOrderByCreatedAtDesc(@Param("buyerId") Long buyerId, Pageable pageable);
     
-    @Query("SELECT DISTINCT o FROM Order o " +
+    @Query(value = "SELECT DISTINCT o FROM Order o " +
            "LEFT JOIN FETCH o.orderItems oi " +
            "LEFT JOIN FETCH oi.product p " +
            "LEFT JOIN FETCH oi.seller " +
            "WHERE o.buyer.userId = :buyerId AND o.status = :status " +
-           "ORDER BY o.createdAt DESC")
+           "ORDER BY o.createdAt DESC",
+           countQuery = "SELECT COUNT(DISTINCT o) FROM Order o " +
+           "WHERE o.buyer.userId = :buyerId AND o.status = :status")
     Page<Order> findByBuyerUserIdAndStatusOrderByCreatedAtDesc(@Param("buyerId") Long buyerId, @Param("status") OrderStatus status, Pageable pageable);
     
     List<Order> findByStatusAndCreatedAtBefore(OrderStatus status, LocalDateTime timestamp);

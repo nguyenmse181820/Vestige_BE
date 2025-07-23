@@ -74,6 +74,8 @@ public class SecurityConfig {
                                 "/api/products/slug-available/{slug}",
                                 "/api/products/top-viewed"
                         ).permitAll()  // Public product endpoints
+                        .requestMatchers(HttpMethod.GET, "/api/reviews/seller/{id:[0-9]+}").permitAll()  // Public seller reviews endpoint
+                        .requestMatchers(HttpMethod.GET, "/api/reviews/seller/{id:[0-9]+}/rating").permitAll()  // Public seller rating endpoint
                         .anyRequest().authenticated()
                 )
                 .sessionManagement(session -> session

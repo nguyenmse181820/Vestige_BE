@@ -152,7 +152,7 @@ public class LogisticsService {
 
         Transaction transaction = getTransactionForOrderItem(orderItem.getOrderItemId());
         transaction.setStatus(TransactionStatus.DELIVERED);
-        transaction.setEscrowStatus(EscrowStatus.RELEASED);
+        transaction.setEscrowStatus(EscrowStatus.AWAITING_RELEASE);
         transaction.setDeliveredAt(LocalDateTime.now());
 
         // 1. Get the existing list from the managed entity

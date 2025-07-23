@@ -50,23 +50,25 @@ public interface ReviewRepository extends JpaRepository<Review, Long> {
     List<Review> findRecentReviewsForSellerWithDetails(@Param("seller") User seller, Pageable pageable);
     
     // Enhanced methods with complete relationship loading for ReviewService
-    @Query("SELECT r FROM Review r " +
+    @Query(value = "SELECT r FROM Review r " +
            "LEFT JOIN FETCH r.reviewer " +
            "LEFT JOIN FETCH r.reviewedUser " +
            "LEFT JOIN FETCH r.transaction t " +
            "LEFT JOIN FETCH t.orderItem oi " +
            "LEFT JOIN FETCH oi.product p " +
            "WHERE r.reviewedUser = :reviewedUser " +
-           "ORDER BY r.createdAt DESC")
+           "ORDER BY r.createdAt DESC",
+           countQuery = "SELECT COUNT(r) FROM Review r WHERE r.reviewedUser = :reviewedUser")
     Page<Review> findByReviewedUserWithAllRelationships(@Param("reviewedUser") User reviewedUser, Pageable pageable);
     
-    @Query("SELECT r FROM Review r " +
+    @Query(value = "SELECT r FROM Review r " +
            "LEFT JOIN FETCH r.reviewer " +
            "LEFT JOIN FETCH r.reviewedUser " +
            "LEFT JOIN FETCH r.transaction t " +
            "LEFT JOIN FETCH t.orderItem oi " +
            "LEFT JOIN FETCH oi.product p " +
            "WHERE r.reviewer = :reviewer " +
-           "ORDER BY r.createdAt DESC")
+           "ORDER BY r.createdAt DESC",
+           countQuery = "SELECT COUNT(r) FROM Review r WHERE r.reviewer = :reviewer")
     Page<Review> findByReviewerWithAllRelationships(@Param("reviewer") User reviewer, Pageable pageable);
 }

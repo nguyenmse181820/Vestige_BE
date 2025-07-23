@@ -97,17 +97,6 @@ public class TrustScoreService {
         return (timeDecayedAverageRating / 5.0) * 100;
     }
 
-    private double calculateProfileScore(User user) {
-        double score = 0;
-        if (user.getIsVerified()) score += 50;
-        if (user.getStripeAccountId() != null && !user.getStripeAccountId().isEmpty()) score += 25;
-        if (user.getProfilePictureUrl() != null && user.getBio() != null) score += 10;
-
-        long monthsSinceCreation = ChronoUnit.MONTHS.between(user.getJoinedDate(), LocalDateTime.now());
-        score += Math.min(monthsSinceCreation * 2, 15); // Capped at 15 points
-
-        return score;
-    }
 
     private TrustTier determineTrustTier(int score, long totalCompletedSales, boolean isVerified) {
         if (score >= 95 && totalCompletedSales >= 100) return TrustTier.ELITE_SELLER;
@@ -116,17 +105,10 @@ public class TrustScoreService {
         return TrustTier.NEW_SELLER;
     }
 
-    /**
-     * Manually update trust scores for all users. This can be called by an admin endpoint.
-     */
     public void updateAllUserTrustScores() {
         userRepository.findAll().forEach(this::updateUserTrustScore);
     }
 
-    /**
-     * Get the calculated trust score for a user without persisting it.
-     * Useful for preview/testing purposes.
-     */
     public int calculateTrustScorePreview(User user) {
         int score6Months = calculateOverallScoreForWindow(user, 6);
         int score12Months = calculateOverallScoreForWindow(user, 12);

@@ -26,6 +26,7 @@ public interface SystemRatingRepository extends JpaRepository<SystemRating, Long
     Long countByRating(int rating);
     
     // Get all ratings with user information for pagination
-    @Query("SELECT sr FROM SystemRating sr LEFT JOIN FETCH sr.user ORDER BY sr.createdAt DESC")
+    @Query(value = "SELECT sr FROM SystemRating sr LEFT JOIN FETCH sr.user ORDER BY sr.createdAt DESC",
+           countQuery = "SELECT COUNT(sr) FROM SystemRating sr")
     Page<SystemRating> findAllWithUser(Pageable pageable);
 }

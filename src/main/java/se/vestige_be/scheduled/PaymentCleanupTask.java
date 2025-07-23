@@ -28,18 +28,13 @@ public class PaymentCleanupTask {
     private final TransactionRepository transactionRepository;
     private final OrderService orderService;
 
-    /**
-     * Clean up abandoned PayOS payments every 30 minutes
-     * Products in PENDING_PAYMENT status for more than 30 minutes will be restored to ACTIVE
-     */
-    @Scheduled(fixedRate = 30 * 60 * 1000) // 30 minutes
+    @Scheduled(fixedRate = 15 * 60 * 1000)
     @Transactional
     public void cleanupAbandonedPayments() {
         log.info("Starting cleanup of abandoned PayOS payments...");
         
         try {
-            // Find products that have been PENDING_PAYMENT for more than 30 minutes
-            LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(30);
+            LocalDateTime cutoffTime = LocalDateTime.now().minusMinutes(15);
             
             List<Product> abandonedProducts = productRepository.findByStatusAndUpdatedAtBefore(
                     ProductStatus.PENDING_PAYMENT, cutoffTime);

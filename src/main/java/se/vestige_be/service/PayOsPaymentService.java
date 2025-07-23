@@ -27,6 +27,7 @@ import java.util.Arrays;
 import java.util.Collections;
 import java.util.List;
 import java.util.ArrayList;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
@@ -85,9 +86,35 @@ public class PayOsPaymentService {
             Order order = orderRepository.findById(orderResponse.getOrderId())
                     .orElseThrow(() -> new BusinessLogicException("Failed to retrieve created order"));
 
+            // CRITICAL FIX: Update transactions with PayOS orderCode
+            // The main createOrder method doesn't set payosOrderCode, so we need to update it
+            for (OrderItem orderItem : order.getOrderItems()) {
+                Transaction transaction = transactionRepository.findByOrderItemOrderItemId(orderItem.getOrderItemId())
+                        .orElseThrow(() -> new BusinessLogicException("Transaction not found for order item"));
+                
+                log.info("BEFORE UPDATE: Transaction ID: {}, Current payosOrderCode: '{}'", 
+                        transaction.getTransactionId(), transaction.getPayosOrderCode());
+                        
+                transaction.setPayosOrderCode(orderCode);
+                Transaction savedTransaction = transactionRepository.save(transaction);
+                
+                log.info("AFTER UPDATE: Transaction ID: {}, Stored payosOrderCode: '{}', Save successful: {}", 
+                        savedTransaction.getTransactionId(), 
+                        savedTransaction.getPayosOrderCode(),
+                        savedTransaction.getPayosOrderCode() != null && savedTransaction.getPayosOrderCode().equals(orderCode));
+                        
+                // Verification: immediately try to find the transaction by orderCode to ensure it was saved correctly
+                Optional<Transaction> verificationOpt = transactionRepository.findByPayosOrderCodeWithAllRelationships(orderCode);
+                log.info("VERIFICATION: Can find transaction by orderCode '{}': {}", orderCode, verificationOpt.isPresent());
+                if (!verificationOpt.isPresent()) {
+                    log.error("CRITICAL: Transaction was saved but cannot be found by orderCode immediately after save!");
+                }
+            }
+
             // Add debugging to check product status after order creation
             Product refreshedProduct = productRepository.findById(product.getProductId()).orElse(product);
-            log.info("AFTER ORDER CREATION - Product {} status: {}", refreshedProduct.getProductId(), refreshedProduct.getStatus());
+            log.info("AFTER ORDER CREATION - Product {} status: {}, PayOS orderCode: {}", 
+                    refreshedProduct.getProductId(), refreshedProduct.getStatus(), orderCode);
 
             // Create PayOS payment link
             String checkoutUrl = createPayOsPaymentLink(order, refreshedProduct, orderCode);
@@ -130,6 +157,7 @@ public class PayOsPaymentService {
 
             String description = createPaymentDescription(product.getTitle(), order.getBuyer().getUsername());
             String returnUrl = payOsService.getFrontendUrl() + "/checkout/success?orderId=" + order.getOrderId();
+//            String returnUrl = "http://localhost:3000/checkout/success?orderId=" + order.getOrderId();
             String cancelUrl = payOsService.getFrontendUrl() + "/payment-cancel?orderCode=" + orderCode;
 
             PaymentData paymentData = PaymentData.builder()
@@ -207,7 +235,10 @@ public class PayOsPaymentService {
      * Generate unique order code for PayOS
      */
     private String generateOrderCode(Long timestamp) {
-        return String.valueOf(timestamp).substring(5) + String.format("%03d", (int)(timestamp % 1000));
+        // Generate a consistent 11-digit orderCode
+        String orderCode = String.valueOf(timestamp).substring(5) + String.format("%03d", (int)(timestamp % 1000));
+        log.debug("Generated orderCode: '{}' from timestamp: {}", orderCode, timestamp);
+        return orderCode;
     }
 
     /**

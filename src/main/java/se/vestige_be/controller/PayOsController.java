@@ -56,7 +56,23 @@ public class PayOsController {
             
             if (isPaymentVerified) {
                 // Check if it's a membership payment or order payment
+                // Try to find transaction with the original orderCode format first
+                log.info("DEBUG: Looking for transaction with original orderCode: '{}'", orderCodeStr);
                 Optional<Transaction> transactionOpt = transactionRepository.findByPayosOrderCodeWithAllRelationships(orderCodeStr);
+                
+                // If not found, try with leading zeros format (PayOS sometimes adds leading zeros)
+                if (transactionOpt.isEmpty() && orderCodeStr.length() < 11) {
+                    String paddedOrderCode = String.format("%011d", orderCode);
+                    log.info("Transaction not found with orderCode '{}', trying with leading zeros: '{}'", orderCodeStr, paddedOrderCode);
+                    transactionOpt = transactionRepository.findByPayosOrderCodeWithAllRelationships(paddedOrderCode);
+                }
+                
+                // If still not found, try removing leading zeros (in case stored without but received with)
+                if (transactionOpt.isEmpty() && orderCodeStr.startsWith("0")) {
+                    String unPaddedOrderCode = String.valueOf(orderCode);
+                    log.info("Transaction not found with padded orderCode, trying without leading zeros: '{}'", unPaddedOrderCode);
+                    transactionOpt = transactionRepository.findByPayosOrderCodeWithAllRelationships(unPaddedOrderCode);
+                }
                 
                 if (transactionOpt.isPresent()) {
                     // It's an order payment
@@ -64,6 +80,8 @@ public class PayOsController {
                     
                     try {
                         log.info("Payment verified successfully for order code: {}. Confirming order payment...", orderCodeStr);
+                        log.info("DEBUG: Found transaction with ID: {}, stored orderCode: '{}'", 
+                                transaction.getTransactionId(), transaction.getPayosOrderCode());
                         
                         // Update transaction status
                         transaction.setStatus(TransactionStatus.PAID);
@@ -90,7 +108,16 @@ public class PayOsController {
                                         .build());
                     }
                 } else {
-                    // It's a membership payment
+                    // Transaction not found - could be membership payment OR orderCode format issue
+                    // Let's also check if there's an order that was recently created for this product
+                    // by checking if there are any recent orders with PENDING status
+                    
+                    log.info("DEBUG: Transaction not found after trying all orderCode formats. Original: '{}', Padded: '{}', Numeric: '{}'", 
+                            orderCodeStr, 
+                            orderCodeStr.length() < 11 ? String.format("%011d", orderCode) : "N/A",
+                            String.valueOf(orderCode));
+                    log.info("DEBUG: Assuming this is a membership payment and attempting to activate subscription...");
+                    
                     try {
                         log.info("Payment verified successfully for order code: {}. Activating subscription...", orderCodeStr);
                         membershipService.activateSubscription(orderCodeStr);
@@ -103,6 +130,10 @@ public class PayOsController {
                                 
                     } catch (Exception e) {
                         log.error("CRITICAL: Failed to activate subscription for order code {}: {}", orderCodeStr, e.getMessage(), e);
+                        
+                        // Additional debugging info for orderCode format issues
+                        log.error("DEBUG: OrderCode format analysis - received: '{}', length: {}", orderCodeStr, orderCodeStr.length());
+                        
                         return ResponseEntity.status(HttpStatus.INTERNAL_SERVER_ERROR)
                                 .body(ApiResponse.<String>builder()
                                         .message("Payment verified but subscription activation failed: " + e.getMessage())
@@ -146,7 +177,22 @@ public class PayOsController {
 
         try {
             // Check if it's an order payment (has transaction)
+            // Try to find transaction with the original orderCode format first
             Optional<Transaction> transactionOpt = transactionRepository.findByPayosOrderCodeWithAllRelationships(orderCodeStr);
+            
+            // If not found, try with leading zeros format (PayOS sometimes adds leading zeros)
+            if (transactionOpt.isEmpty()) {
+                try {
+                    long orderCode = Long.parseLong(orderCodeStr);
+                    if (orderCodeStr.length() < 11) {
+                        String paddedOrderCode = String.format("%011d", orderCode);
+                        log.info("Transaction not found with orderCode '{}', trying with leading zeros: '{}'", orderCodeStr, paddedOrderCode);
+                        transactionOpt = transactionRepository.findByPayosOrderCodeWithAllRelationships(paddedOrderCode);
+                    }
+                } catch (NumberFormatException e) {
+                    log.warn("Invalid orderCode format: {}", orderCodeStr);
+                }
+            }
             
             if (transactionOpt.isPresent()) {
                 // It's an order payment - cancel the order and restore product status

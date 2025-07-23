@@ -44,6 +44,10 @@ public class MembershipPlan {
     @Column(name = "required_trust_tier")
     private TrustTier requiredTrustTier;
 
+    @Column(name = "required_completed_orders", nullable = false)
+    @Builder.Default
+    private Integer requiredCompletedOrders = 0;
+
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "tier_id")
     @ToString.Exclude

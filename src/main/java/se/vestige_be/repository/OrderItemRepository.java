@@ -25,20 +25,22 @@ public interface OrderItemRepository extends JpaRepository<OrderItem, Long> {
            "ORDER BY oi.order.createdAt DESC")
     List<OrderItem> findBySellerUserIdOrderByOrderCreatedAtDesc(@Param("sellerId") Long sellerId);
 
-    @Query("SELECT oi FROM OrderItem oi " +
+    @Query(value = "SELECT oi FROM OrderItem oi " +
            "LEFT JOIN FETCH oi.product p " +
            "LEFT JOIN FETCH oi.seller " +
            "LEFT JOIN FETCH oi.order " +
            "WHERE oi.seller.userId = :sellerId " +
-           "ORDER BY oi.order.createdAt DESC")
+           "ORDER BY oi.order.createdAt DESC",
+           countQuery = "SELECT COUNT(oi) FROM OrderItem oi WHERE oi.seller.userId = :sellerId")
     Page<OrderItem> findBySellerUserIdOrderByOrderCreatedAtDesc(@Param("sellerId") Long sellerId, Pageable pageable);
 
-    @Query("SELECT oi FROM OrderItem oi " +
+    @Query(value = "SELECT oi FROM OrderItem oi " +
            "LEFT JOIN FETCH oi.product p " +
            "LEFT JOIN FETCH oi.seller " +
            "LEFT JOIN FETCH oi.order " +
            "WHERE oi.seller.userId = :sellerId AND oi.status = :status " +
-           "ORDER BY oi.order.createdAt DESC")
+           "ORDER BY oi.order.createdAt DESC",
+           countQuery = "SELECT COUNT(oi) FROM OrderItem oi WHERE oi.seller.userId = :sellerId AND oi.status = :status")
     Page<OrderItem> findBySellerUserIdAndStatusOrderByOrderCreatedAtDesc(@Param("sellerId") Long sellerId, @Param("status") OrderItemStatus status, Pageable pageable);
 
     // Find order items by seller and escrow status

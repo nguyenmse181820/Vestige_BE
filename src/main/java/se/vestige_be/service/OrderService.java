@@ -64,7 +64,7 @@ public class OrderService {
         if (!shippingAddress.getUser().getUserId().equals(buyerId)) {
             throw new UnauthorizedException("Shipping address does not belong to the buyer");
         }
-        List<OrderItemData> itemDataList = validateAndProcessItems(request.getItems(), buyerId);
+        List<OrderItemData> itemDataList = validateAndProcessItems(request.getItems(), buyerId, request.getPaymentMethod());
         BigDecimal totalAmount = itemDataList.stream()
                 .map(OrderItemData::getItemPrice)
                 .reduce(BigDecimal.ZERO, BigDecimal::add);
@@ -110,20 +110,6 @@ public class OrderService {
 
         // Create transactions after order items have been saved and have IDs
         createTransactions(order.getOrderItems(), buyer, shippingAddress, paymentIntentId);
-        
-        // Handle PayOS payment link creation after order items are created
-        /*
-        if (request.getPaymentMethod() == PaymentMethod.PAYOS) {
-            try {
-                PayOsPaymentService.PaymentResponse paymentResponse = payOsPaymentService.createPayment(buyerId, request);
-                payosCheckoutUrl = paymentResponse.getCheckoutUrl();
-                log.info("Created PayOS payment link for order {}: {}", order.getOrderId(), payosCheckoutUrl);
-            } catch (Exception e) {
-                log.error("Failed to create PayOS payment for order {}: {}", order.getOrderId(), e.getMessage());
-                throw new BusinessLogicException("Could not create PayOS payment. Please try again later.");
-            }
-        }
-        */
         
         markProductsAsPendingPayment(itemDataList);
 
@@ -363,14 +349,18 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
             LocalDateTime startDate, LocalDateTime endDate, Pageable pageable) {
         // Use specification pattern with proper JOIN FETCH for relationships
         Page<Order> orders = orderRepository.findAll((root, query, criteriaBuilder) -> {
-            // Add JOIN FETCH for required relationships
-            root.fetch("buyer", JoinType.LEFT);
-            root.fetch("orderItems", JoinType.LEFT).fetch("product", JoinType.LEFT);
-            root.fetch("orderItems", JoinType.LEFT).fetch("seller", JoinType.LEFT);
-            root.fetch("shippingAddress", JoinType.LEFT);
+            // Only add JOIN FETCH for non-count queries
+            // Count queries (query.getResultType() == Long.class) cannot have JOIN FETCH
+            if (query.getResultType() != Long.class) {
+                // Add JOIN FETCH for required relationships
+                root.fetch("buyer", JoinType.LEFT);
+                root.fetch("orderItems", JoinType.LEFT).fetch("product", JoinType.LEFT);
+                root.fetch("orderItems", JoinType.LEFT).fetch("seller", JoinType.LEFT);
+                root.fetch("shippingAddress", JoinType.LEFT);
 
-            // Make the query DISTINCT to avoid duplicates from JOIN FETCH
-            query.distinct(true);
+                // Make the query DISTINCT to avoid duplicates from JOIN FETCH
+                query.distinct(true);
+            }
 
             List<jakarta.persistence.criteria.Predicate> predicates = new ArrayList<>();
 
@@ -1111,14 +1101,14 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
 
 // Private helper methods
 
-    private List<OrderItemData> validateAndProcessItems(List<OrderCreateRequest.OrderItemRequest> itemRequests, Long buyerId) {
+    private List<OrderItemData> validateAndProcessItems(List<OrderCreateRequest.OrderItemRequest> itemRequests, Long buyerId, PaymentMethod paymentMethod) {
         if (itemRequests.isEmpty()) {
             throw new BusinessLogicException("Order must contain at least one item");
         }
 
         List<OrderItemData> itemDataList = new ArrayList<>();
         for (OrderCreateRequest.OrderItemRequest itemRequest : itemRequests) {
-            OrderItemData itemData = validateAndProcessItem(itemRequest, buyerId);
+            OrderItemData itemData = validateAndProcessItem(itemRequest, buyerId, paymentMethod);
             itemDataList.add(itemData);
         }
 
@@ -1128,7 +1118,7 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
     // Data class for order processing
 
 
-    private OrderItemData validateAndProcessItem(OrderCreateRequest.OrderItemRequest itemRequest, Long buyerId) {
+    private OrderItemData validateAndProcessItem(OrderCreateRequest.OrderItemRequest itemRequest, Long buyerId, PaymentMethod paymentMethod) {
         Product product = productRepository.findById(itemRequest.getProductId())
                 .orElseThrow(() -> new ResourceNotFoundException("Product not found: " + itemRequest.getProductId()));
 
@@ -1142,9 +1132,9 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
             throw new BusinessLogicException("Cannot purchase your own product: " + product.getTitle());
         }
 
-        // Validate seller has Stripe account for non-COD payments
-        if (product.getSeller().getStripeAccountId() == null) {
-            throw new BusinessLogicException("Seller must complete payment setup before selling products");
+        // Validate seller has Stripe account only for Stripe payments
+        if (paymentMethod == PaymentMethod.STRIPE_CARD && product.getSeller().getStripeAccountId() == null) {
+            throw new BusinessLogicException("Seller must complete Stripe payment setup before selling products with Stripe");
         }
 
         // Handle offer or regular price
@@ -1281,7 +1271,7 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
                 .findByStatusAndDeliveredAtBeforeAndEscrowStatus(
                         TransactionStatus.DELIVERED,
                         sevenDaysAgo,
-                        EscrowStatus.RELEASED
+                        EscrowStatus.AWAITING_RELEASE
                 );
 
         if (!readyTransactions.isEmpty()) {
@@ -1298,6 +1288,8 @@ public OrderDetailResponse getOrderById(Long orderId, Long userId) {
                 log.info("Payment release for transaction {} - handled by PayOs system", transaction.getTransactionId());
 
                 transaction.setEscrowStatus(EscrowStatus.TRANSFERRED);
+                // Also update the order item escrow status
+                orderItem.setEscrowStatus(EscrowStatus.TRANSFERRED);
                 transactionRepository.save(transaction);
 
                 log.info("Successfully released payment for transaction {}", transaction.getTransactionId());
@@ -2128,8 +2120,8 @@ public OrderDetailResponse adminUpdateUserOrder(Long userId, Long orderId, Strin
             case DELIVERED:
                 transaction.setDeliveredAt(LocalDateTime.now());
                 transaction.setStatus(TransactionStatus.DELIVERED);
-                // Set escrow status to RELEASED after delivery
-                transaction.setEscrowStatus(EscrowStatus.RELEASED);
+                // Set escrow status to AWAITING_RELEASE after delivery
+                transaction.setEscrowStatus(EscrowStatus.AWAITING_RELEASE);
                 break;
 
             case CANCELLED:
